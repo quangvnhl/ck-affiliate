@@ -26,10 +26,10 @@ export async function registerAction(
   try {
     // 1. Parse và validate input
     const rawData = {
-      email: formData.get("email") as string,
-      password: formData.get("password") as string,
-      confirmPassword: formData.get("confirmPassword") as string,
-      guestSessionId: formData.get("guestSessionId") as string | undefined,
+      email: (formData.get("email") as string) || "",
+      password: (formData.get("password") as string) || "",
+      confirmPassword: (formData.get("confirmPassword") as string) || "",
+      guestSessionId: (formData.get("guestSessionId") as string) || undefined,
     };
 
     const validatedFields = registerSchema.safeParse(rawData);
@@ -167,9 +167,9 @@ export async function loginAction(
       .limit(1);
 
     if (existingUser.length > 0 && existingUser[0].status === "banned") {
-      return { 
-        success: false, 
-        error: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin." 
+      return {
+        success: false,
+        error: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin."
       };
     }
 
@@ -218,7 +218,7 @@ export async function logoutAction(): Promise<void> {
 export async function getCurrentUser() {
   const { auth } = await import("@/auth");
   const session = await auth();
-  
+
   if (!session?.user) {
     return null;
   }
