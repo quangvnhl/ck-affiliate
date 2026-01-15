@@ -1,0 +1,212 @@
+"use server";
+
+import { eq, sql, desc, and, gte, lte } from "drizzle-orm";
+
+import { db } from "@/db";
+import { users, transactions, withdrawalRequests, platforms } from "@/db/schema";
+import { auth } from "@/auth";
+import type { Result } from "@/types";
+
+// ============================================
+// TYPES
+// ============================================
+
+export interface AdminTransactionItem {
+    id: string;
+    type: "cashback" | "withdrawal";
+    userId: string;
+    userEmail: string;
+    amount: number;
+    status: string;
+    platformName?: string;
+    orderIdExternal?: string;
+    createdAt: Date;
+}
+
+export interface TransactionStats {
+    totalCashback: number;
+    totalWithdrawn: number;
+    pendingWithdrawals: number;
+    todayTransactions: number;
+}
+
+// ============================================
+// CHECK ADMIN PERMISSION
+// ============================================
+
+async function checkAdminPermission(): Promise<Result<string>> {
+    const session = await auth();
+
+    if (!session?.user?.id) {
+        return { success: false, error: "Unauthorized" };
+    }
+
+    if (session.user.role !== "admin") {
+        return { success: false, error: "Forbidden - Admin only" };
+    }
+
+    return { success: true, data: session.user.id };
+}
+
+// ============================================
+// GET ALL TRANSACTIONS (ADMIN)
+// ============================================
+
+export async function getAdminTransactionsAction(
+    filter?: "all" | "cashback" | "withdrawal"
+): Promise<Result<AdminTransactionItem[]>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        const result: AdminTransactionItem[] = [];
+
+        // Lấy transactions (cashback)
+        if (!filter || filter === "all" || filter === "cashback") {
+            const cashbacks = await db
+                .select({
+                    id: transactions.id,
+                    userId: transactions.userId,
+                    amount: transactions.cashbackAmount,
+                    status: transactions.status,
+                    orderIdExternal: transactions.orderIdExternal,
+                    platformId: transactions.platformId,
+                    createdAt: transactions.createdAt,
+                })
+                .from(transactions)
+                .orderBy(desc(transactions.createdAt))
+                .limit(100);
+
+            // Lấy user email và platform name
+            for (const tx of cashbacks) {
+                if (!tx.userId) continue;
+
+                const user = await db
+                    .select({ email: users.email })
+                    .from(users)
+                    .where(eq(users.id, tx.userId))
+                    .limit(1);
+
+                let platformName = "Unknown";
+                if (tx.platformId) {
+                    const platform = await db
+                        .select({ name: platforms.name })
+                        .from(platforms)
+                        .where(eq(platforms.id, tx.platformId))
+                        .limit(1);
+                    platformName = platform[0]?.name || "Unknown";
+                }
+
+                result.push({
+                    id: tx.id,
+                    type: "cashback",
+                    userId: tx.userId,
+                    userEmail: user[0]?.email || "N/A",
+                    amount: Number(tx.amount) || 0,
+                    status: tx.status,
+                    platformName,
+                    orderIdExternal: tx.orderIdExternal || undefined,
+                    createdAt: tx.createdAt,
+                });
+            }
+        }
+
+        // Lấy withdrawals
+        if (!filter || filter === "all" || filter === "withdrawal") {
+            const withdrawals = await db
+                .select({
+                    id: withdrawalRequests.id,
+                    userId: withdrawalRequests.userId,
+                    amount: withdrawalRequests.amount,
+                    status: withdrawalRequests.status,
+                    createdAt: withdrawalRequests.createdAt,
+                })
+                .from(withdrawalRequests)
+                .orderBy(desc(withdrawalRequests.createdAt))
+                .limit(100);
+
+            for (const wd of withdrawals) {
+                if (!wd.userId) continue;
+
+                const user = await db
+                    .select({ email: users.email })
+                    .from(users)
+                    .where(eq(users.id, wd.userId))
+                    .limit(1);
+
+                result.push({
+                    id: wd.id,
+                    type: "withdrawal",
+                    userId: wd.userId,
+                    userEmail: user[0]?.email || "N/A",
+                    amount: Number(wd.amount) || 0,
+                    status: wd.status,
+                    createdAt: wd.createdAt,
+                });
+            }
+        }
+
+        // Sort by createdAt desc
+        result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+        return { success: true, data: result.slice(0, 100) };
+    } catch (error) {
+        console.error("Get admin transactions error:", error);
+        return { success: false, error: "Lỗi tải danh sách giao dịch" };
+    }
+}
+
+// ============================================
+// GET TRANSACTION STATS (ADMIN)
+// ============================================
+
+export async function getAdminTransactionStatsAction(): Promise<Result<TransactionStats>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        // Tổng cashback (approved)
+        const cashbackSum = await db
+            .select({ total: sql<number>`COALESCE(sum(${transactions.cashbackAmount}), 0)` })
+            .from(transactions)
+            .where(eq(transactions.status, "approved"));
+
+        // Tổng đã rút (approved)
+        const withdrawnSum = await db
+            .select({ total: sql<number>`COALESCE(sum(${withdrawalRequests.amount}), 0)` })
+            .from(withdrawalRequests)
+            .where(eq(withdrawalRequests.status, "approved"));
+
+        // Pending withdrawals count
+        const pendingCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(withdrawalRequests)
+            .where(eq(withdrawalRequests.status, "pending"));
+
+        // Today transactions
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const todayTxCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(transactions)
+            .where(gte(transactions.createdAt, today));
+
+        return {
+            success: true,
+            data: {
+                totalCashback: Number(cashbackSum[0]?.total) || 0,
+                totalWithdrawn: Number(withdrawnSum[0]?.total) || 0,
+                pendingWithdrawals: Number(pendingCount[0]?.count) || 0,
+                todayTransactions: Number(todayTxCount[0]?.count) || 0,
+            },
+        };
+    } catch (error) {
+        console.error("Get admin transaction stats error:", error);
+        return { success: false, error: "Lỗi tải thống kê" };
+    }
+}

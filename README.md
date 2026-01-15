@@ -1,36 +1,193 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🔗 CK Affiliate
 
-## Getting Started
+<p align="center">
+  <strong>Nền tảng tiếp thị liên kết Shopee & TikTok Shop</strong>
+</p>
 
-First, run the development server:
+<p align="center">
+  <a href="#tính-năng">Tính năng</a> •
+  <a href="#công-nghệ">Công nghệ</a> •
+  <a href="#cài-đặt">Cài đặt</a> •
+  <a href="#sử-dụng">Sử dụng</a> •
+  <a href="#cấu-trúc">Cấu trúc</a>
+</p>
+
+---
+
+## 📖 Giới thiệu
+
+**CK Affiliate** là nền tảng giúp bạn kiếm tiền từ việc chia sẻ link sản phẩm từ Shopee và TikTok Shop. Tạo link tiếp thị trong vài giây, chia sẻ và nhận **70% hoa hồng** từ mỗi đơn hàng thành công.
+
+### 🎯 Điểm nổi bật
+
+- ✅ **Không cần đăng ký** - Tạo link ngay, đăng ký sau
+- ✅ **Hoa hồng cao** - Nhận 70% commission từ các sàn
+- ✅ **Đa sàn** - Hỗ trợ Shopee và TikTok Shop
+- ✅ **Rút tiền nhanh** - Chuyển khoản trực tiếp về tài khoản
+
+---
+
+## ✨ Tính năng
+
+### Người dùng
+- 🔗 Tạo link affiliate từ Shopee/TikTok
+- 📊 Dashboard theo dõi link và hoa hồng
+- 💰 Ví tiền và yêu cầu rút tiền
+- 🏦 Quản lý thông tin ngân hàng
+- 📱 Giao diện responsive trên mọi thiết bị
+
+### Admin
+- 📈 Bảng điều khiển với KPIs tổng quan
+- 👥 Quản lý người dùng (ban/unban, điều chỉnh số dư)
+- 💳 Quản lý giao dịch và duyệt rút tiền
+- ⚙️ Cấu hình hệ thống và platforms
+- 🔗 Thêm link thủ công
+
+---
+
+## 🛠 Công nghệ
+
+| Layer | Công nghệ |
+|-------|-----------|
+| **Framework** | Next.js 15 (App Router) |
+| **Language** | TypeScript |
+| **Styling** | Tailwind CSS + Shadcn UI |
+| **Database** | PostgreSQL + Drizzle ORM |
+| **Auth** | NextAuth.js v5 |
+| **Validation** | Zod |
+
+---
+
+## 🚀 Cài đặt
+
+### Yêu cầu
+
+- Node.js 18+
+- PostgreSQL 15+
+- npm / yarn / pnpm
+
+### Các bước
 
 ```bash
+# 1. Clone repository
+git clone https://github.com/your-org/ck-affiliate.git
+cd ck-affiliate
+
+# 2. Cài đặt dependencies
+npm install
+
+# 3. Tạo file môi trường
+cp .env.example .env.local
+
+# 4. Cấu hình database trong .env.local
+DATABASE_URL="postgresql://user:password@localhost:5432/ck_affiliate"
+AUTH_SECRET="your-secret-key"
+
+# 5. Chạy migration
+npm run db:push
+
+# 6. Khởi động development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Mở [http://localhost:3000](http://localhost:3000) để xem kết quả.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📁 Cấu trúc
 
-## Learn More
+```
+ck-affiliate/
+├── src/
+│   ├── app/                 # Next.js App Router
+│   │   ├── (admin)/        # Admin routes
+│   │   ├── (auth)/         # Auth routes
+│   │   ├── (dashboard)/    # User dashboard
+│   │   └── page.tsx        # Homepage
+│   ├── actions/            # Server Actions
+│   ├── components/         # React components
+│   │   ├── features/       # Feature components
+│   │   └── ui/             # Shadcn UI
+│   ├── db/                 # Drizzle ORM
+│   ├── lib/                # Utilities
+│   ├── services/           # Business logic
+│   └── types/              # TypeScript types
+├── docs/                   # Documentation
+├── specs/                  # Specifications
+└── drizzle/               # Migrations
+```
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🗃 Database Schema
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+┌──────────────────┐       ┌──────────────────┐
+│      users       │       │    platforms     │
+├──────────────────┤       ├──────────────────┤
+│ id               │       │ id               │
+│ email            │       │ name             │
+│ password         │       │ isActive         │
+│ role             │       │ commissionShare  │
+│ walletBalance    │       └────────┬─────────┘
+│ bankInfo         │                │
+└────────┬─────────┘                │
+         │                          │
+         ▼                          ▼
+┌──────────────────────────────────────────────┐
+│              affiliate_links                  │
+├──────────────────────────────────────────────┤
+│ id | userId | platformId | shortLink | clicks│
+└──────────────────────────────────────────────┘
+         │
+         ▼
+┌──────────────────┐    ┌──────────────────────┐
+│   transactions   │    │ withdrawal_requests  │
+├──────────────────┤    ├──────────────────────┤
+│ cashback records │    │ withdrawal requests  │
+└──────────────────┘    └──────────────────────┘
+```
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🔧 Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev        # Development server
+npm run build      # Production build
+npm run start      # Start production
+npm run lint       # ESLint check
+npm run db:push    # Push schema to DB
+npm run db:studio  # Open Drizzle Studio
+```
+
+---
+
+## 📚 Tài liệu
+
+- [📊 Báo cáo dự án](docs/PROJECT_REPORT.md)
+- [🏗 Cấu trúc dự án](docs/project_structure.md)
+- [📝 Business Logic](docs/business_logic.md)
+- [🗄 Database Schema](docs/database_schema.sql)
+
+---
+
+## 🤝 Đóng góp
+
+1. Fork dự án
+2. Tạo feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
+5. Mở Pull Request
+
+---
+
+## 📄 License
+
+MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
+
+---
+
+<p align="center">
+  Made with ❤️ by CK Affiliate Team
+</p>
