@@ -17,6 +17,12 @@ export interface PlatformConfig {
     isActive: boolean;
     commissionShare: number;
     apiConfig: {
+        // Mode: "api" hoặc "manual"
+        mode?: "api" | "manual";
+        // Manual Mode fields
+        affiliate_id?: string;
+        default_sub_id?: string;
+        // API Mode fields
         appId?: string;
         apiKey?: string;
         apiSecret?: string;
@@ -82,6 +88,12 @@ export async function updatePlatformConfigAction(
         isActive?: boolean;
         commissionShare?: number;
         apiConfig?: {
+            // Mode selection
+            mode?: "api" | "manual";
+            // Manual Mode fields
+            affiliate_id?: string;
+            default_sub_id?: string;
+            // API Mode fields
             appId?: string;
             apiKey?: string;
             apiSecret?: string;

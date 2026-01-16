@@ -144,7 +144,7 @@ export default function LinksPage() {
 
                   {/* Short Link */}
                   <div className="mt-2 flex items-center gap-2">
-                    <p className="font-medium text-amber-600 truncate">
+                    <p className="font-medium text-amber-600 break-all text-ellipsis overflow-hidden line-clamp-2">
                       {link.shortLink}
                     </p>
                     <button
@@ -170,7 +170,7 @@ export default function LinksPage() {
                   </div>
 
                   {/* Original URL */}
-                  <p className="mt-1 text-sm text-slate-500 break-all">
+                  <p className="mt-1 text-sm text-slate-500 break-all text-ellipsis overflow-hidden line-clamp-2">
                     {link.originalUrl}
                   </p>
                 </div>

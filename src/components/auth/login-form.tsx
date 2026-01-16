@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Lock, LogIn } from "lucide-react";
+import { Loader2, Mail, Lock, LogIn, Home } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +52,14 @@ export function LoginForm() {
         <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-lg">
             {/* Header */}
             <div className="mb-8 text-center">
+                <div className="flex">
+                    <Link href="/" className="flex items-center gap-2 hover:bg-amber-100 rounded-full pr-3">
+                        <div className="rounded-full p-2 bg-amber-100">
+                            <Home className="h-5 w-5 text-amber-600" />
+                        </div>
+                        <span className="text-amber-600 text-sm font-medium">Trang chủ</span>
+                    </Link>
+                </div>
                 <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
                     <LogIn className="h-7 w-7 text-amber-600" />
                 </div>

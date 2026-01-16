@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { HeroLinkGenerator } from "@/components/features/hero-link-generator";
 import { auth } from "@/auth";
+import { LayoutDashboard, LogOut } from "lucide-react";
 
 export default async function HomePage() {
   const session = await auth();
@@ -48,11 +49,17 @@ export default async function HomePage() {
                     {session.user.email?.split("@")[0]}
                   </span>
                 </Link>
+                {/* Dashboard */}
+                <Link href="/dashboard" className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors">
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </Link>
                 {/* Logout button */}
                 <Link
                   href="/api/auth/signout"
-                  className="text-sm font-medium px-4 py-2 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
+                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
                 >
+                  <LogOut className="h-4 w-4" />
                   Đăng xuất
                 </Link>
               </>

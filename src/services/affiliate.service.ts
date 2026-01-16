@@ -1,4 +1,7 @@
 import type { Result } from "@/types";
+import { db } from "@/db";
+import { platforms } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 // ============================================
 // TYPES & INTERFACES
@@ -39,6 +42,7 @@ export interface PlatformOrder {
 // Mỗi sàn (Shopee, TikTok) sẽ implement interface này
 // ============================================
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface IAffiliateAdapter {
   readonly platform: PlatformType;
 
@@ -46,8 +50,9 @@ export interface IAffiliateAdapter {
    * Tạo link affiliate rút gọn
    * @param url - URL gốc sản phẩm
    * @param subId - Tracking ID (format: userId_timestamp)
+   * @param config - Optional platform config từ database
    */
-  generateLink(url: string, subId: string): Promise<string>;
+  generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<string>;
 
   /**
    * Lấy danh sách đơn hàng từ API sàn
@@ -113,10 +118,19 @@ function simulateApiDelay(): Promise<void> {
 // Adapter cho Shopee Affiliate API
 // ============================================
 
+// Interface cho api_config từ bảng platforms
+export interface ShopeePlatformConfig {
+  mode: "api" | "manual";
+  affiliate_id?: string;
+  default_sub_id?: string;
+  app_id?: string;
+  secret?: string;
+}
+
 export class ShopeeAdapter implements IAffiliateAdapter {
   readonly platform: PlatformType = "shopee";
 
-  // Config từ environment (sẽ dùng khi tích hợp API thật)
+  // Config từ environment (dùng cho API mode)
   private readonly appId?: string;
   private readonly apiKey?: string;
   private readonly apiSecret?: string;
@@ -130,27 +144,49 @@ export class ShopeeAdapter implements IAffiliateAdapter {
 
   /**
    * Tạo link affiliate Shopee
-   * Mock: Trả về link giả lập
-   * Production: Gọi Shopee Affiliate API
+   * Hỗ trợ 2 mode: API và Manual
+   * @param url - URL gốc sản phẩm
+   * @param subId - Tracking ID (userId hoặc guestId)
+   * @param config - Optional config từ bảng platforms
    */
-  async generateLink(url: string, subId: string): Promise<string> {
+  async generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<string> {
     // Simulate API delay
     await simulateApiDelay();
 
-    // TODO: Khi có API thật, implement như sau:
-    // const response = await fetch("https://affiliate.shopee.vn/api/v1/link", {
-    //   method: "POST",
-    //   headers: {
-    //     "Authorization": `Bearer ${this.apiKey}`,
-    //     "Content-Type": "application/json",
-    //   },
-    //   body: JSON.stringify({
-    //     url,
-    //     sub_id: subId,
-    //   }),
-    // });
-    // const data = await response.json();
-    // return data.short_link;
+    // Cast config về ShopeePlatformConfig nếu có
+    const shopeeConfig = config as ShopeePlatformConfig | undefined;
+
+    // Kiểm tra mode từ config
+    if (shopeeConfig?.mode === "manual" && shopeeConfig.affiliate_id) {
+      return this.generateManualLink(url, subId, shopeeConfig);
+    }
+
+    // API Mode (hoặc Mock nếu chưa có config)
+    return this.generateApiLink(url, subId);
+  }
+
+  /**
+   * Tạo link thủ công theo công thức Universal Link
+   * Công thức: https://s.shopee.vn/an_redir?origin_link={encoded}&affiliate_id={id}&sub_id={tracking}
+   */
+  private generateManualLink(url: string, userId: string, config: ShopeePlatformConfig): string {
+    // Encode URL gốc
+    const encodedUrl = encodeURIComponent(url);
+
+    // Tạo tracking_tag: {default_sub_id}_{userId}
+    const trackingTag = `${config.default_sub_id || "CK"}_${userId}`;
+
+    // Ghép công thức
+    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
+  }
+
+  /**
+   * Tạo link qua API (Mock implementation)
+   * Production: Gọi Shopee Affiliate GraphQL API
+   */
+  private async generateApiLink(url: string, subId: string): Promise<string> {
+    // TODO: Khi có API thật, implement GraphQL call theo specs/integration_shopee_api.md
+    // const response = await fetch("https://open-api.affiliate.shopee.vn/graphql", {...});
 
     // Mock implementation
     const randomId = Math.random().toString(36).substring(2, 10);
@@ -357,16 +393,31 @@ export async function generateShortLink(
       };
     }
 
-    // 2. Lấy adapter từ Factory
+    // 2. Query platform config từ database
+    const platformRecord = await db.query.platforms.findFirst({
+      where: eq(platforms.name, platform),
+    });
+
+    // Lấy api_config (có thể null)
+    const platformConfig = platformRecord?.apiConfig as Record<string, unknown> | null;
+
+    // 3. Lấy adapter từ Factory
     const adapter = AffiliateAdapterFactory.getAdapter(platform);
 
-    // 3. Generate sub_id cho tracking
+    // 4. Generate tracking ID
+    // Với Manual Mode: dùng userId/guestId trực tiếp (không thêm timestamp)
+    // Với API Mode: dùng subId format cũ
+    const trackingId = userId || guestSessionId || "anon";
     const subId = generateSubId(userId, guestSessionId);
 
-    // 4. Gọi adapter để tạo link
-    const shortLink = await adapter.generateLink(originalUrl, subId);
+    // 5. Gọi adapter để tạo link (truyền config nếu có)
+    const shortLink = await adapter.generateLink(
+      originalUrl,
+      platformConfig?.mode === "manual" ? trackingId : subId,
+      platformConfig || undefined
+    );
 
-    // 5. Lấy thông tin sản phẩm
+    // 6. Lấy thông tin sản phẩm
     const productInfo = await adapter.getProductInfo(originalUrl);
 
     return {
@@ -375,7 +426,7 @@ export async function generateShortLink(
         shortLink,
         originalUrl,
         platform,
-        subId,
+        subId: platformConfig?.mode === "manual" ? trackingId : subId,
         productInfo,
       },
     };

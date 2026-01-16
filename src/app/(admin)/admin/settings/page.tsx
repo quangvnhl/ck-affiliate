@@ -13,6 +13,7 @@ import {
     Percent,
     Key,
     AlertCircle,
+    Link2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -184,11 +185,25 @@ function PlatformCard({
     onSave: () => void;
 }) {
     const [commissionShare, setCommissionShare] = useState(platform.commissionShare.toString());
+
+    // Mode selection: "api" hoặc "manual"
+    const [configMode, setConfigMode] = useState<"api" | "manual">(
+        platform.apiConfig?.mode || "manual"
+    );
+
+    // Manual Mode config
+    const [manualConfig, setManualConfig] = useState({
+        affiliate_id: platform.apiConfig?.affiliate_id || "",
+        default_sub_id: platform.apiConfig?.default_sub_id || "",
+    });
+
+    // API Mode config
     const [apiConfig, setApiConfig] = useState({
         appId: "",
         apiKey: "",
         apiSecret: "",
     });
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -204,9 +219,28 @@ function PlatformCard({
             commissionShare: parseInt(commissionShare),
         };
 
-        // Only include apiConfig if any field is filled
-        if (apiConfig.appId || apiConfig.apiKey || apiConfig.apiSecret) {
-            config.apiConfig = apiConfig;
+        // Build apiConfig based on selected mode
+        if (configMode === "manual") {
+            // Validate required fields for manual mode
+            if (!manualConfig.affiliate_id.trim()) {
+                setError("Vui lòng nhập Affiliate ID");
+                setIsSubmitting(false);
+                return;
+            }
+
+            config.apiConfig = {
+                mode: "manual",
+                affiliate_id: manualConfig.affiliate_id.trim(),
+                default_sub_id: manualConfig.default_sub_id.trim() || "CK",
+            };
+        } else {
+            // API Mode - include API credentials if filled
+            if (apiConfig.appId || apiConfig.apiKey || apiConfig.apiSecret) {
+                config.apiConfig = {
+                    mode: "api",
+                    ...apiConfig,
+                };
+            }
         }
 
         const result = await updatePlatformConfigAction(platform.id, config);
@@ -232,7 +266,7 @@ function PlatformCard({
                     <div>
                         <h3 className="text-lg font-semibold text-slate-50 capitalize">{platform.name}</h3>
                         <p className="text-sm text-slate-400">
-                            Tỷ lệ hiện tại: {platform.commissionShare}%
+                            Mode: {platform.apiConfig?.mode === "api" ? "API" : "Manual Link"}
                         </p>
                     </div>
                 </div>
@@ -274,35 +308,124 @@ function PlatformCard({
                 </div>
             </div>
 
-            {/* API Config (when editing) */}
-            {isEditing && (
-                <div className="space-y-3 mb-4">
+            {/* Current Config Display (when not editing) */}
+            {!isEditing && platform.apiConfig?.mode === "manual" && platform.apiConfig?.affiliate_id && (
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4 mb-4">
                     <div className="flex items-center gap-2 mb-2">
-                        <Key className="h-4 w-4 text-slate-400" />
-                        <span className="text-sm font-medium text-slate-300">API Configuration</span>
+                        <Link2 className="h-4 w-4 text-slate-400" />
+                        <span className="text-sm font-medium text-slate-300">Manual Mode Config</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                            <span className="text-slate-500">Affiliate ID:</span>
+                            <span className="ml-2 text-slate-300">{platform.apiConfig.affiliate_id}</span>
+                        </div>
+                        <div>
+                            <span className="text-slate-500">Sub ID Prefix:</span>
+                            <span className="ml-2 text-slate-300">{platform.apiConfig.default_sub_id || "CK"}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Form */}
+            {isEditing && (
+                <div className="space-y-4 mb-4">
+                    {/* Mode Selector */}
+                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                        <p className="text-sm font-medium text-slate-300 mb-3">Chế độ tạo link</p>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setConfigMode("manual")}
+                                className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${configMode === "manual"
+                                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/50"
+                                        : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
+                                    }`}
+                            >
+                                <Link2 className="h-4 w-4 inline-block mr-2" />
+                                Manual Link
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setConfigMode("api")}
+                                className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${configMode === "api"
+                                        ? "bg-blue-500/20 text-blue-400 border border-blue-500/50"
+                                        : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
+                                    }`}
+                            >
+                                <Key className="h-4 w-4 inline-block mr-2" />
+                                API Mode
+                            </button>
+                        </div>
                     </div>
 
-                    <Input
-                        type="text"
-                        placeholder="App ID"
-                        value={apiConfig.appId}
-                        onChange={(e) => setApiConfig({ ...apiConfig, appId: e.target.value })}
-                        className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
-                    />
-                    <Input
-                        type="password"
-                        placeholder="API Key"
-                        value={apiConfig.apiKey}
-                        onChange={(e) => setApiConfig({ ...apiConfig, apiKey: e.target.value })}
-                        className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
-                    />
-                    <Input
-                        type="password"
-                        placeholder="API Secret"
-                        value={apiConfig.apiSecret}
-                        onChange={(e) => setApiConfig({ ...apiConfig, apiSecret: e.target.value })}
-                        className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
-                    />
+                    {/* Manual Mode Config */}
+                    {configMode === "manual" && (
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Link2 className="h-4 w-4 text-orange-400" />
+                                <span className="text-sm font-medium text-slate-300">Cấu hình Manual Link</span>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Affiliate ID *</label>
+                                <Input
+                                    type="text"
+                                    placeholder="VD: 17628374291"
+                                    value={manualConfig.affiliate_id}
+                                    onChange={(e) => setManualConfig({ ...manualConfig, affiliate_id: e.target.value })}
+                                    className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-500 mb-1 block">Default Sub ID (Prefix)</label>
+                                <Input
+                                    type="text"
+                                    placeholder="VD: CKWEB"
+                                    value={manualConfig.default_sub_id}
+                                    onChange={(e) => setManualConfig({ ...manualConfig, default_sub_id: e.target.value })}
+                                    className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Format: {manualConfig.default_sub_id || "CK"}_{"<userId>"}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* API Mode Config */}
+                    {configMode === "api" && (
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Key className="h-4 w-4 text-blue-400" />
+                                <span className="text-sm font-medium text-slate-300">API Configuration</span>
+                            </div>
+
+                            <Input
+                                type="text"
+                                placeholder="App ID"
+                                value={apiConfig.appId}
+                                onChange={(e) => setApiConfig({ ...apiConfig, appId: e.target.value })}
+                                className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                            />
+                            <Input
+                                type="password"
+                                placeholder="API Key"
+                                value={apiConfig.apiKey}
+                                onChange={(e) => setApiConfig({ ...apiConfig, apiKey: e.target.value })}
+                                className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                            />
+                            <Input
+                                type="password"
+                                placeholder="API Secret"
+                                value={apiConfig.apiSecret}
+                                onChange={(e) => setApiConfig({ ...apiConfig, apiSecret: e.target.value })}
+                                className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                            />
+                        </div>
+                    )}
 
                     {error && (
                         <div className="flex items-center gap-2 text-sm text-red-400">
@@ -346,7 +469,7 @@ function PlatformCard({
                 ) : (
                     <Button
                         variant="outline"
-                        className="w-full border-slate-700 text-slate-300"
+                        className="w-full border-slate-700 text-slate-300 bg-slate-800/30 hover:bg-white hover:text-slate-700"
                         onClick={onToggleEdit}
                     >
                         <Settings className="mr-2 h-4 w-4" />

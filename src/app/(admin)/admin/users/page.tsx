@@ -135,99 +135,110 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Users Table */}
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden">
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30 w-full overflow-x-auto max-w-[100vw]">
         <table className="w-full">
           <thead>
             <tr className="border-b border-slate-700 bg-slate-800/50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Email
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Trạng thái
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Số dư ví
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Links
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Ngày tạo
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase">
+              <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase whitespace-nowrap">
                 Hành động
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50">
-            {filteredUsers.map((user) => (
-              <tr key={user.id} className="hover:bg-slate-800/30">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white">
-                      {user.email.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-medium text-slate-50">{user.email}</p>
-                      <p className="text-xs text-slate-500">{user.id.slice(0, 8)}...</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={user.status} />
-                </td>
-                <td className="px-4 py-3 text-slate-50">
-                  {formatCurrency(Number(user.walletBalance))}
-                </td>
-                <td className="px-4 py-3 text-slate-400">{user.linksCount}</td>
-                <td className="px-4 py-3 text-sm text-slate-400">
-                  {formatDate(user.createdAt)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="relative">
-                    <button
-                      onClick={() => setActionUserId(actionUserId === user.id ? null : user.id)}
-                      className="rounded-lg p-2 hover:bg-slate-700"
-                    >
-                      <MoreHorizontal className="h-4 w-4 text-slate-400" />
-                    </button>
-
-                    {/* Action Dropdown */}
-                    {actionUserId === user.id && (
-                      <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-slate-700 bg-slate-800 shadow-lg">
-                        <button
-                          onClick={() => handleToggleStatus(user.id)}
-                          className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
-                        >
-                          {user.status === "active" ? (
-                            <>
-                              <Ban className="h-4 w-4 text-red-400" />
-                              Khóa tài khoản
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="h-4 w-4 text-green-400" />
-                              Mở khóa
-                            </>
-                          )}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setAdjustUserId(user.id);
-                            setShowAdjustModal(true);
-                            setActionUserId(null);
-                          }}
-                          className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
-                        >
-                          <DollarSign className="h-4 w-4 text-amber-400" />
-                          Điều chỉnh số dư
-                        </button>
+            {filteredUsers.map((user, index) => {
+              const isLastRow = index === filteredUsers.length - 1;
+              return (
+                <tr key={user.id} className="hover:bg-slate-800/30">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white shrink-0">
+                        {user.email.charAt(0).toUpperCase()}
                       </div>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-50 whitespace-nowrap">{user.email}</p>
+                        <p className="text-xs text-slate-500">{user.id.slice(0, 8)}...</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={user.status} />
+                  </td>
+                  <td className="px-4 py-3 text-slate-50 whitespace-nowrap">
+                    {formatCurrency(Number(user.walletBalance))}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">{user.linksCount}</td>
+                  <td className="px-4 py-3 text-sm text-slate-400 whitespace-nowrap">
+                    {formatDate(user.createdAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="relative inline-block">
+                      <button
+                        onClick={() => setActionUserId(actionUserId === user.id ? null : user.id)}
+                        className="rounded-lg p-2 hover:bg-slate-700"
+                      >
+                        <MoreHorizontal className="h-4 w-4 text-slate-400" />
+                      </button>
+
+                      {/* Action Dropdown */}
+                      {actionUserId === user.id && (
+                        <>
+                          {/* Backdrop để close dropdown */}
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setActionUserId(null)}
+                          />
+                          <div className={`absolute right-0 z-50 w-48 rounded-lg border border-slate-700 bg-slate-800 shadow-lg ${isLastRow ? "bottom-full mb-1" : "top-full mt-1"
+                            }`}>
+                            <button
+                              onClick={() => handleToggleStatus(user.id)}
+                              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded-t-lg"
+                            >
+                              {user.status === "active" ? (
+                                <>
+                                  <Ban className="h-4 w-4 text-red-400" />
+                                  Khóa tài khoản
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-green-400" />
+                                  Mở khóa
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setAdjustUserId(user.id);
+                                setShowAdjustModal(true);
+                                setActionUserId(null);
+                              }}
+                              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded-b-lg"
+                            >
+                              <DollarSign className="h-4 w-4 text-amber-400" />
+                              Điều chỉnh số dư
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
@@ -298,8 +309,8 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${isActive
-          ? "bg-green-500/20 text-green-400"
-          : "bg-red-500/20 text-red-400"
+        ? "bg-green-500/20 text-green-400"
+        : "bg-red-500/20 text-red-400"
         }`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-green-400" : "bg-red-400"}`} />

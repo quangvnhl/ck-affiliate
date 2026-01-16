@@ -9,9 +9,11 @@ import {
   LogOut,
   Shield,
   Link2,
+  Home,
 } from "lucide-react";
 
 import { auth } from "@/auth";
+import { AdminMobileSidebar } from "@/components/shared/admin-mobile-sidebar";
 
 // Admin Layout - Dark Mode Theme với Slate Deep Colors
 // Middleware đã check quyền admin, nhưng thêm layer bảo vệ ở đây
@@ -33,7 +35,7 @@ export default async function AdminLayout({
 
   return (
     <div className="dark">
-      <div className="flex min-h-screen bg-slate-900 text-slate-50">
+      <div className="lg:flex min-h-screen bg-slate-900 text-slate-50">
         {/* Admin Sidebar */}
         <aside className="hidden w-64 flex-shrink-0 border-r border-slate-700 bg-slate-950 lg:flex lg:flex-col">
           {/* Logo */}
@@ -44,6 +46,9 @@ export default async function AdminLayout({
 
           {/* Navigation */}
           <nav className="flex-1 space-y-1 p-4">
+            <NavItem href="/" icon={Home}>
+              Trang chủ
+            </NavItem>
             <NavItem href="/admin/dashboard" icon={LayoutDashboard}>
               Tổng quan
             </NavItem>
@@ -90,10 +95,11 @@ export default async function AdminLayout({
         {/* Main Content */}
         <div className="flex flex-1 flex-col">
           {/* Admin Header */}
-          <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-700 bg-slate-900/80 backdrop-blur-sm px-6">
-            {/* Mobile menu button placeholder */}
-            <div className="flex items-center gap-4 lg:hidden">
-              <Shield className="h-6 w-6 text-blue-500" />
+          <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-700 bg-slate-900/80 backdrop-blur-sm px-4 lg:px-6">
+            {/* Mobile menu button */}
+            <div className="flex items-center gap-3 lg:hidden">
+              <AdminMobileSidebar userEmail={session.user.email || ""} />
+              <Shield className="h-5 w-5 text-blue-500" />
               <span className="font-bold">Admin</span>
             </div>
 
