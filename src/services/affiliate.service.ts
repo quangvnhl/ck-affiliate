@@ -1,7 +1,11 @@
 import type { Result } from "@/types";
 import { db } from "@/db";
-import { platforms } from "@/db/schema";
+import { platforms, affiliateLinks } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { customAlphabet } from "nanoid";
+
+// Alphanumeric only alphabet (no _ or -)
+const ALPHANUMERIC = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 // ============================================
 // TYPES & INTERFACES
@@ -20,7 +24,9 @@ export interface ProductInfo {
 
 // Kết quả tạo link
 export interface GeneratedLinkResult {
-  shortLink: string;
+  shortLink: string;     // Internal short URL (e.g., https://domain.com/abc12)
+  trackingUrl: string;   // Platform affiliate URL (the actual redirect target)
+  code: string;          // 5-char unique code for internal shortener
   originalUrl: string;
   platform: PlatformType;
   subId: string;
@@ -79,8 +85,8 @@ export function detectPlatform(url: string): PlatformType | null {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
 
-    // Shopee domains
-    if (hostname.includes("shopee.vn") || hostname.includes("shope.ee")) {
+    // Shopee domains (including app short links)
+    if (hostname.includes("shopee.vn") || hostname.includes("shope.ee") || hostname.includes("vn.shp.ee")) {
       return "shopee";
     }
 
@@ -111,6 +117,33 @@ export function generateSubId(userId?: string, guestSessionId?: string): string 
 function simulateApiDelay(): Promise<void> {
   const delay = Math.random() * 1000 + 500;
   return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+/**
+ * Generate a unique short code for internal shortener
+ * Uses nanoid with collision check against database
+ */
+async function generateUniqueCode(length: number = 5): Promise<string> {
+  const maxAttempts = 10;
+  const generateCode = customAlphabet(ALPHANUMERIC, length);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const code = generateCode();
+
+    // Check for collision in database
+    const existing = await db.query.affiliateLinks.findFirst({
+      where: eq(affiliateLinks.code, code),
+      columns: { id: true },
+    });
+
+    if (!existing) {
+      return code;
+    }
+  }
+
+  // Fallback: use longer code to reduce collision probability
+  const fallbackGenerator = customAlphabet(ALPHANUMERIC, length + 3);
+  return fallbackGenerator();
 }
 
 // ============================================
@@ -145,7 +178,7 @@ export class ShopeeAdapter implements IAffiliateAdapter {
   /**
    * Tạo link affiliate Shopee
    * Hỗ trợ 2 mode: API và Manual
-   * @param url - URL gốc sản phẩm
+   * @param url - URL gốc sản phẩm (có thể là link rút gọn)
    * @param subId - Tracking ID (userId hoặc guestId)
    * @param config - Optional config từ bảng platforms
    */
@@ -153,16 +186,33 @@ export class ShopeeAdapter implements IAffiliateAdapter {
     // Simulate API delay
     await simulateApiDelay();
 
+    // Kiểm tra nếu là link rút gọn Shopee (s.shopee.vn hoặc shope.ee)
+    // thì resolve về link gốc trước
+    let cleanUrl = url;
+    try {
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname.toLowerCase();
+
+      if (hostname.includes("s.shopee.vn") || hostname.includes("shope.ee") || hostname.includes("vn.shp.ee")) {
+        console.log("[ShopeeAdapter] Detecting short link, resolving...", url);
+        cleanUrl = await resolveAndCleanShopeeUrl(url);
+        console.log("[ShopeeAdapter] Resolved to clean URL:", cleanUrl);
+      }
+    } catch (err) {
+      console.error("[ShopeeAdapter] Error checking URL:", err);
+      // Giữ nguyên URL gốc nếu có lỗi
+    }
+
     // Cast config về ShopeePlatformConfig nếu có
     const shopeeConfig = config as ShopeePlatformConfig | undefined;
 
     // Kiểm tra mode từ config
     if (shopeeConfig?.mode === "manual" && shopeeConfig.affiliate_id) {
-      return this.generateManualLink(url, subId, shopeeConfig);
+      return this.generateManualLink(cleanUrl, subId, shopeeConfig);
     }
 
     // API Mode (hoặc Mock nếu chưa có config)
-    return this.generateApiLink(url, subId);
+    return this.generateApiLink(cleanUrl, subId);
   }
 
   /**
@@ -410,20 +460,29 @@ export async function generateShortLink(
     const trackingId = userId || guestSessionId || "anon";
     const subId = generateSubId(userId, guestSessionId);
 
-    // 5. Gọi adapter để tạo link (truyền config nếu có)
-    const shortLink = await adapter.generateLink(
+    // 5. Gọi adapter để tạo link platform (this becomes trackingUrl)
+    const trackingUrl = await adapter.generateLink(
       originalUrl,
       platformConfig?.mode === "manual" ? trackingId : subId,
       platformConfig || undefined
     );
 
-    // 6. Lấy thông tin sản phẩm
+    // 6. Generate unique code for internal shortener
+    const code = await generateUniqueCode(5);
+
+    // 7. Build internal short link
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const shortLink = `${baseUrl}/${code}`;
+
+    // 8. Lấy thông tin sản phẩm
     const productInfo = await adapter.getProductInfo(originalUrl);
 
     return {
       success: true,
       data: {
         shortLink,
+        trackingUrl,
+        code,
         originalUrl,
         platform,
         subId: platformConfig?.mode === "manual" ? trackingId : subId,
@@ -437,5 +496,43 @@ export async function generateShortLink(
       success: false,
       error: "Hệ thống đang bảo trì, vui lòng thử lại sau.",
     };
+  }
+}
+
+/**
+ * Hàm lấy link gốc từ link rút gọn Shopee và xóa params rác
+ * @param shortLink Link rút gọn (VD: https://s.shopee.vn/qdHvqFrBS)
+ */
+export async function resolveAndCleanShopeeUrl(shortLink: string): Promise<string> {
+  try {
+    // Bước 1: Gọi fetch để lấy URL đích
+    // Sử dụng method 'HEAD' để chỉ lấy headers (nhanh hơn), nếu Shopee chặn HEAD thì đổi sang 'GET'
+    const response = await fetch(shortLink, {
+      method: 'GET',
+      redirect: 'follow', // BẮT BUỘC: Để tự động đi theo redirect 301/302
+      headers: {
+        // Fake User-Agent để tránh bị chặn bởi tường lửa Shopee
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    const finalUrl = response.url; // Đây là URL đích sau khi đã redirect xong
+
+    // Bước 2: Làm sạch URL (Xóa params)
+    const urlObj = new URL(finalUrl);
+
+    // Mẹo: Gán search = rỗng để xóa toàn bộ tham số sau dấu ? (utm_source, spm, v.v...)
+    urlObj.search = '';
+
+    // Nếu bạn muốn kỹ hơn, xóa cả hash (#) thì dùng dòng dưới
+    // urlObj.hash = '';
+
+    // Bước 3: Trả về link sạch (bỏ luôn dấu / ở cuối nếu có cho đẹp)
+    return urlObj.toString().replace(/\/$/, "");
+
+  } catch (error) {
+    console.error("Lỗi khi resolve link Shopee:", error);
+    // Nếu lỗi, trả về nguyên gốc để hệ thống không bị crash
+    return shortLink;
   }
 }

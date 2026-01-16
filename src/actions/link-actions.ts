@@ -95,6 +95,8 @@ export async function createLinkAction(
         guestSessionId: !userId ? guestSessionId : null,
         originalUrl,
         shortLink: result.data.shortLink,
+        code: result.data.code,
+        trackingUrl: result.data.trackingUrl,
         platformId,
         clicks: 0,
       })
@@ -298,14 +300,24 @@ export async function createManualLinkAction(
       }
     }
 
-    // 5. Insert vào database
+    // 5. Generate unique code for internal shortener
+    const { nanoid } = await import("nanoid");
+    const code = nanoid(5);
+
+    // Build internal short link
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const internalShortLink = `${baseUrl}/${code}`;
+
+    // 6. Insert vào database
     const newLink = await db
       .insert(affiliateLinks)
       .values({
         userId: userId || null,
         guestSessionId: userId ? null : "system_import", // Mark as system import
         originalUrl: originalUrl || shortLink, // Fallback to shortLink if no originalUrl
-        shortLink,
+        shortLink: internalShortLink, // Internal short link
+        code, // Unique code for redirect
+        trackingUrl: shortLink, // Admin provided link becomes tracking URL
         platformId: finalPlatformId,
         clicks: 0,
       })

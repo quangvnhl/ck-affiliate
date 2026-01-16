@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { HeroLinkGenerator } from "@/components/features/hero-link-generator";
 import { auth } from "@/auth";
-import { LayoutDashboard, LogOut } from "lucide-react";
+import { LayoutDashboard, LogOut, ShoppingCart } from "lucide-react";
 
 export default async function HomePage() {
   const session = await auth();
@@ -60,7 +60,7 @@ export default async function HomePage() {
                   className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  Đăng xuất
+                  <span className="sm:inline hidden">Đăng xuất</span>
                 </Link>
               </>
             ) : (
@@ -85,7 +85,7 @@ export default async function HomePage() {
 
       {/* Hero Section */}
       <main className="flex-1">
-        <section className="py-16 md:py-24">
+        <section className="py-16 md:py-24 bg-linear-to-r from-amber-400 to-orange-500">
           <HeroLinkGenerator />
         </section>
 
@@ -106,7 +106,7 @@ export default async function HomePage() {
                   Dán link sản phẩm
                 </h3>
                 <p className="text-sm text-slate-600">
-                  Copy link sản phẩm từ Shopee hoặc TikTok Shop mà bạn muốn chia sẻ
+                  Copy link sản phẩm từ Shopee hoặc TikTok Shop mà bạn muốn mua.
                 </p>
               </div>
 
@@ -116,10 +116,14 @@ export default async function HomePage() {
                   2
                 </div>
                 <h3 className="font-semibold text-slate-900 mb-2">
-                  Nhận link tiếp thị
+                  Bấm
+                  <span className="inline-flex items-center gap-2 bg-amber-100 px-2 py-1 rounded-full ml-1">
+                    <ShoppingCart className="h-4 w-4" />
+                    <span>Mở để mua hàng</span>
+                  </span>
                 </h3>
                 <p className="text-sm text-slate-600">
-                  Hệ thống tự động tạo link rút gọn kèm mã theo dõi của bạn
+                  Hệ thống tự động ghi nhận đơn hàng.
                 </p>
               </div>
 
@@ -132,7 +136,7 @@ export default async function HomePage() {
                   Nhận hoa hồng
                 </h3>
                 <p className="text-sm text-slate-600">
-                  Khi có người mua qua link của bạn, nhận ngay 70% hoa hồng từ sàn
+                  Đăng nhập vào Dashboard để nhận hoa hồng về tài khoản ngân hàng.
                 </p>
               </div>
             </div>

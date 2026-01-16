@@ -65,8 +65,12 @@ export const affiliateLinks = pgTable(
     guestSessionId: varchar("guest_session_id", { length: 100 }),
 
     originalUrl: text("original_url").notNull(),
-    shortLink: text("short_link").notNull(),
+    shortLink: text("short_link").notNull(), // Internal short link (e.g., https://domain.com/abc12)
     platformId: integer("platform_id").references(() => platforms.id),
+
+    // Internal Shortener fields
+    code: varchar("code", { length: 10 }).unique().notNull(), // Unique short code for redirect
+    trackingUrl: text("tracking_url").notNull(), // Original platform affiliate link
 
     clicks: integer("clicks").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -75,6 +79,7 @@ export const affiliateLinks = pgTable(
     // Indexes để tối ưu truy vấn
     index("idx_links_user").on(table.userId),
     index("idx_links_guest").on(table.guestSessionId),
+    index("idx_links_code").on(table.code), // Fast lookup for redirects
   ]
 );
 

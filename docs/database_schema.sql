@@ -36,18 +36,29 @@ CREATE TABLE platforms (
 -- 3. Bảng Affiliate Links (Thêm guest_session_id)
 CREATE TABLE affiliate_links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id), -- Null nếu là khách vãng lai
+  user_id UUID REFERENCES users(id),
+  guest_session_id VARCHAR(100),
   
-  -- QUAN TRỌNG: Dùng để map dữ liệu khi khách đăng ký thành viên
-  guest_session_id VARCHAR(100), -- Lưu ID từ Cookie/LocalStorage nếu user chưa login
+  -- Link sản phẩm gốc do user nhập (VD: shopee.vn/ao-thun...)
+  original_url TEXT NOT NULL, 
   
-  original_url TEXT NOT NULL,
+  -- Link Shopee dài đã ghép tracking (VD: https://s.shopee.vn/an_redir?...)
+  -- Hệ thống sẽ redirect user tới link này
+  tracking_url TEXT NOT NULL, 
+  
+  -- Mã định danh ngắn (VD: "x9Az1")
+  code VARCHAR(10) UNIQUE NOT NULL, 
+  
+  -- Link hiển thị cuối cùng (VD: https://ckaffiliate.com/x9Az1)
   short_link TEXT NOT NULL,
-  platform_id INT REFERENCES platforms(id),
   
-  clicks INT DEFAULT 0, -- Số lượt click (có thể update real-time hoặc định kỳ)
+  platform_id INT REFERENCES platforms(id),
+  clicks INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- INDEXES (Thêm index cho code để Redirect nhanh)
+CREATE INDEX idx_links_code ON affiliate_links(code);
 
 -- 4. Bảng Transactions (Dòng tiền VÀO - Cashback từ đơn hàng)
 CREATE TABLE transactions (

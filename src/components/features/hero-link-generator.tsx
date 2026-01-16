@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useCallback } from "react";
-import { Link2, ArrowRight, Copy, Check, ExternalLink } from "lucide-react";
+import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { useLinkStore } from "@/store/use-link-store";
 import { createLinkAction } from "@/actions/link-actions";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/utils";
+import Image from "next/image";
 
 // ============================================
 // COMPONENT: HeroLinkGenerator
@@ -107,16 +108,32 @@ export function HeroLinkGenerator() {
     }
   }, [generatedLink?.shortLink]);
 
+  // Handle paste from clipboard button
+  const handlePasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setInputValue(text.trim());
+        setError(null);
+        toast.success("Đã dán link!");
+      }
+    } catch {
+      toast.error("Không thể đọc clipboard. Vui lòng dán thủ công.");
+    }
+  }, []);
+
   return (
     <div className="w-full max-w-2xl mx-auto px-4">
       {/* Headline */}
       <div className="text-center mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-3">
+        <h1 className="text-3xl md:text-4xl font-bold mb-3 text-white">
           Tạo Link Tiếp Thị
         </h1>
-        <p className="text-lg text-slate-600">
-          Dán link Shopee/TikTok - Nhận hoa hồng ngay lập tức
-        </p>
+        <div className="md:text-lg text-base text-amber-200 md:flex items-center gap-2 justify-center">
+          <div className="md:block">Dán link Shopee/TikTok</div>
+          <div className="md:block hidden">-</div>
+          <div className="md:block">Nhận hoa hồng ngay lập tức</div>
+        </div>
       </div>
 
       {/* Input Section */}
@@ -128,7 +145,7 @@ export function HeroLinkGenerator() {
           )}
         >
           {/* Icon */}
-          <div className="absolute left-4 text-slate-400">
+          <div className="absolute left-4 text-slate-400 sm:block hidden">
             <Link2 className="h-5 w-5" />
           </div>
 
@@ -140,25 +157,51 @@ export function HeroLinkGenerator() {
             onPaste={handlePaste}
             onKeyDown={handleKeyDown}
             placeholder="Dán link sản phẩm vào đây (VD: https://shopee.vn/...)"
-            className="w-full h-14 pl-12 pr-36 outline-none text-slate-900 md:text-lg bg-transparent"
+            className="w-full h-14 sm:pl-12 pl-6 sm:pr-48 pr-24 outline-none text-slate-900 md:text-lg bg-transparent"
             disabled={isPending}
           />
 
-          {/* Button */}
-          <Button
-            type="submit"
-            disabled={isPending || !inputValue.trim()}
-            className="absolute right-1.5 top-1.5 bottom-1.5 px-6 rounded-full font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-all active:scale-95"
-          >
-            {isPending ? (
-              <Spinner size="sm" className="mr-2" />
-            ) : (
-              <ArrowRight className="h-5 w-5 md:hidden" />
-            )}
-            <span className="hidden md:inline">
-              {isPending ? "Đang tạo..." : "Tạo Link"}
-            </span>
-          </Button>
+          {/* Clear Button */}
+          {inputValue && (
+            <button
+              type="button"
+              onClick={() => {
+                setInputValue("");
+                setError(null);
+              }}
+              className="absolute md:right-32 sm:right-24 right-16 p-1 text-slate-400 hover:text-slate-600 transition-colors"
+              disabled={isPending}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+
+          {/* Button - Paste when empty, Submit when has value */}
+          {inputValue.trim() ? (
+            <Button
+              type="submit"
+              disabled={isPending}
+              className="absolute right-2 sm:px-7 px-4 rounded-full font-semibold text-white bg-amber-500 hover:bg-amber-700 transition-all active:scale-95"
+            >
+              {isPending ? (
+                <Spinner size="sm" className="mr-2" />
+              ) : (
+                <ArrowRight className="h-5 w-5 md:hidden" />
+              )}
+              <span className="hidden md:inline">
+                {isPending ? "Đang tạo..." : "Tạo Link"}
+              </span>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={handlePasteFromClipboard}
+              className="absolute right-2 sm:px-7 px-4 rounded-full font-semibold text-white bg-orange-600 hover:bg-slate-700 transition-all active:scale-95"
+            >
+              <Clipboard className="h-5 w-5 md:mr-2" />
+              <span className="hidden md:inline">Dán link</span>
+            </Button>
+          )}
         </div>
 
         {/* Error message */}
@@ -169,10 +212,17 @@ export function HeroLinkGenerator() {
 
       {/* Platform badges */}
       <div className="flex items-center justify-center gap-4 mt-4">
+        <div className="text-white text-sm flex-none sm:flex-1 sm:block hidden">Tự động nhận diện:</div>
         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+          <Image src="https://img.icons8.com/?size=32&id=mBkyWceUPlkM&format=png" alt="Shopee" width={20} height={20} />
           Shopee
         </span>
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+          <Image src="https://img.icons8.com/?size=32&id=p6TjI8xRp5qI&format=png" alt="Shopee" width={20} height={20} />
+          Shopee Food
+        </span>
         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-900 text-white">
+          <Image src="https://img.icons8.com/?size=32&id=118640&format=png" alt="Shopee" width={20} height={20} />
           TikTok Shop
         </span>
       </div>
@@ -227,35 +277,62 @@ export function HeroLinkGenerator() {
               </Button>
             </div>
 
-            {/* Product Info */}
-            {generatedLink.productInfo && (
-              <div className="mt-4 flex gap-4">
-                {/* Product Image */}
-                <div className="w-20 h-20 bg-slate-100 rounded-lg overflow-hidden shrink-0">
-                  <div className="w-full h-full flex items-center justify-center text-slate-400">
-                    <Link2 className="h-8 w-8" />
-                  </div>
-                </div>
+            {/* Open Link Button */}
+            <a
+              href={generatedLink.shortLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-lg rounded-lg transition-colors"
+            >
+              <ShoppingCart className="h-6 w-6" />
+              Mở để mua hàng
+            </a>
 
-                {/* Product Details */}
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-slate-900 truncate">
-                    {generatedLink.productInfo.name}
-                  </h3>
-                  <p className="text-lg font-bold text-amber-600 mt-1">
-                    {formatCurrency(generatedLink.productInfo.price)}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-slate-500">
-                      Hoa hồng: {generatedLink.productInfo.commission}%
-                    </span>
-                    <span className="text-xs font-medium text-green-600">
-                      ~{formatCurrency(generatedLink.productInfo.cashback)} hoàn
-                    </span>
-                  </div>
+            {/* Instruction Section */}
+            <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+              {/* Guide Text */}
+              <p className="text-sm text-slate-700 leading-relaxed mb-4">
+                💸 Chúng tôi không bán hàng, chúng tôi trả lại % hoa hồng cho bạn.
+                <br />
+                👌 Hãy đảm bảo rằng <strong className="text-amber-700">Giỏ Hàng</strong> của bạn đang không có sản phẩm này trong giỏ hàng.
+                <br />
+                👌 Nếu có sản phẩm này trong <strong className="text-amber-700">Giỏ Hàng</strong>, hãy xóa nó đi và quay lại đây bấm vào <strong className="text-amber-700">Mở để mua hàng</strong>, sau đó bạn có thể <strong className="text-amber-700">Mua luôn</strong> hoặc <strong className="text-amber-700">Thêm vào giỏ</strong> trên sàn TMĐT.
+              </p>
+
+              {/* Mobile Guide */}
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Smartphone className="h-5 w-5 text-slate-600" />
+                  <span className="text-sm font-medium text-slate-700">Trên điện thoại</span>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-slate-200">
+                  <Image
+                    src="/images/add-cart-mobile.png"
+                    alt="Hướng dẫn thêm vào giỏ trên mobile"
+                    width={600}
+                    height={400}
+                    className="w-full h-auto"
+                  />
                 </div>
               </div>
-            )}
+
+              {/* PC Guide */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Monitor className="h-5 w-5 text-slate-600" />
+                  <span className="text-sm font-medium text-slate-700">Trên máy tính</span>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-slate-200">
+                  <Image
+                    src="/images/add-cart-pc.png"
+                    alt="Hướng dẫn thêm vào giỏ trên PC"
+                    width={600}
+                    height={400}
+                    className="w-full h-auto"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Footer */}
@@ -287,9 +364,9 @@ export function HeroLinkGenerator() {
       )}
 
       {/* Guest Notice */}
-      <p className="mt-6 text-center text-sm text-slate-500">
+      <p className="mt-6 text-center text-sm text-white">
         Tạo link miễn phí, không cần đăng nhập.{" "}
-        <a href="/register" className="text-amber-600 hover:underline">
+        <a href="/register" className="text-amber-200 hover:underline">
           Đăng ký
         </a>{" "}
         để theo dõi hoa hồng và rút tiền.
