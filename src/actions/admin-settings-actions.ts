@@ -26,6 +26,9 @@ export interface PlatformConfig {
         appId?: string;
         apiKey?: string;
         apiSecret?: string;
+        // Link generation method settings
+        link_gen_method?: "system_default" | "shopee_api";
+        external_api_url?: string;
     } | null;
 }
 
@@ -97,6 +100,9 @@ export async function updatePlatformConfigAction(
             appId?: string;
             apiKey?: string;
             apiSecret?: string;
+            // Link generation method settings
+            link_gen_method?: "system_default" | "shopee_api";
+            external_api_url?: string;
         };
     }
 ): Promise<Result<PlatformConfig>> {

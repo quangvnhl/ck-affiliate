@@ -127,7 +127,7 @@ export function HeroLinkGenerator() {
       {/* Headline */}
       <div className="text-center mb-8">
         <h1 className="text-3xl md:text-4xl font-bold mb-3 text-white">
-          Tạo Link Tiếp Thị
+          Hoàn tiền mua sắm
         </h1>
         <div className="md:text-lg text-base text-amber-200 md:flex items-center gap-2 justify-center">
           <div className="md:block">Dán link Shopee/TikTok</div>
@@ -277,6 +277,15 @@ export function HeroLinkGenerator() {
               </Button>
             </div>
 
+            {/* Product Title */}
+            {generatedLink.productTitle && (
+              <div className="mt-4 p-3 bg-slate-100 rounded-lg border border-slate-200">
+                <p className="text-sm font-medium text-slate-800 line-clamp-2">
+                  📦 {generatedLink.productTitle}
+                </p>
+              </div>
+            )}
+
             {/* Open Link Button */}
             <a
               href={generatedLink.shortLink}
@@ -287,6 +296,24 @@ export function HeroLinkGenerator() {
               <ShoppingCart className="h-6 w-6" />
               Mở để mua hàng
             </a>
+
+            {/* Commission Estimation Box */}
+            {generatedLink.estCommission && generatedLink.estCommission > 0 && (
+              <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">💰</span>
+                  <span className="text-sm font-medium text-green-800">
+                    Hoa hồng sàn: {formatCurrency(generatedLink.estCommission)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🎁</span>
+                  <span className="text-lg font-bold text-green-700">
+                    Hoàn lại cho bạn: {formatCurrency(Math.round(generatedLink.estCommission * 0.5))} - {formatCurrency(Math.round(generatedLink.estCommission * 0.8))}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Instruction Section */}
             <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">

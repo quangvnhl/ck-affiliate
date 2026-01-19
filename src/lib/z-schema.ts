@@ -96,6 +96,8 @@ export const createLinkSchema = z.object({
           "shope.ee",
           "tiktok.com",
           "vt.tiktok.com",
+          "shp.ee",
+          "shopeefood.vn",
         ];
         try {
           const hostname = new URL(url).hostname;

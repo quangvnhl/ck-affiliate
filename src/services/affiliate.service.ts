@@ -31,6 +31,8 @@ export interface GeneratedLinkResult {
   platform: PlatformType;
   subId: string;
   productInfo?: ProductInfo;
+  estCommission?: number; // Estimated commission from Shopee API (VND)
+  productTitle?: string;  // Product title scraped from originalUrl
 }
 
 // Đơn hàng từ API sàn
@@ -58,7 +60,7 @@ export interface IAffiliateAdapter {
    * @param subId - Tracking ID (format: userId_timestamp)
    * @param config - Optional platform config từ database
    */
-  generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<string>;
+  generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<AdapterLinkResult>;
 
   /**
    * Lấy danh sách đơn hàng từ API sàn
@@ -85,8 +87,14 @@ export function detectPlatform(url: string): PlatformType | null {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
 
-    // Shopee domains (including app short links)
-    if (hostname.includes("shopee.vn") || hostname.includes("shope.ee") || hostname.includes("vn.shp.ee")) {
+    // Shopee domains (including app short links and ShopeeFood)
+    if (
+      hostname.includes("shopee.vn") ||
+      hostname.includes("shopeefood.vn") ||
+      hostname.includes("shope.ee") ||
+      hostname.includes("shp.ee") ||
+      hostname.includes("vn.shp.ee")
+    ) {
       return "shopee";
     }
 
@@ -158,6 +166,17 @@ export interface ShopeePlatformConfig {
   default_sub_id?: string;
   app_id?: string;
   secret?: string;
+  // New fields for link generation settings
+  link_gen_method?: "system_default" | "shopee_api";
+  external_api_url?: string;
+}
+
+// Result type for adapter generateLink
+export interface AdapterLinkResult {
+  shortLink: string;    // Link for "Mở để mua hàng" button
+  originalUrl: string;  // Original long URL from platform
+  cleanUrl: string;     // URL without query params
+  trackingUrl: string;  // URL with affiliate tracking params
 }
 
 export class ShopeeAdapter implements IAffiliateAdapter {
@@ -177,42 +196,153 @@ export class ShopeeAdapter implements IAffiliateAdapter {
 
   /**
    * Tạo link affiliate Shopee
-   * Hỗ trợ 2 mode: API và Manual
+   * Hỗ trợ 3 mode: External API, Manual, và Mock API
    * @param url - URL gốc sản phẩm (có thể là link rút gọn)
    * @param subId - Tracking ID (userId hoặc guestId)
    * @param config - Optional config từ bảng platforms
    */
-  async generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<string> {
+  async generateLink(url: string, subId: string, config?: Record<string, unknown>): Promise<AdapterLinkResult> {
     // Simulate API delay
     await simulateApiDelay();
 
-    // Kiểm tra nếu là link rút gọn Shopee (s.shopee.vn hoặc shope.ee)
-    // thì resolve về link gốc trước
+    // Cast config về ShopeePlatformConfig nếu có
+    const shopeeConfig = config as ShopeePlatformConfig | undefined;
+
+    // Check if using External Shopee API
+    if (shopeeConfig?.link_gen_method === "shopee_api" && shopeeConfig.external_api_url) {
+      console.log("[ShopeeAdapter] Using External Shopee API mode");
+      return this.generateExternalApiLink(url, subId, shopeeConfig);
+    }
+
+    // System Default mode - resolve short links first
     let cleanUrl = url;
     try {
       const urlObj = new URL(url);
       const hostname = urlObj.hostname.toLowerCase();
 
-      if (hostname.includes("s.shopee.vn") || hostname.includes("shope.ee") || hostname.includes("vn.shp.ee")) {
+      if (
+        hostname.includes("s.shopee.vn") ||
+        hostname.includes("shope.ee") ||
+        hostname.includes("shp.ee") ||
+        hostname.includes("vn.shp.ee")
+      ) {
         console.log("[ShopeeAdapter] Detecting short link, resolving...", url);
         cleanUrl = await resolveAndCleanShopeeUrl(url);
         console.log("[ShopeeAdapter] Resolved to clean URL:", cleanUrl);
       }
     } catch (err) {
       console.error("[ShopeeAdapter] Error checking URL:", err);
-      // Giữ nguyên URL gốc nếu có lỗi
     }
-
-    // Cast config về ShopeePlatformConfig nếu có
-    const shopeeConfig = config as ShopeePlatformConfig | undefined;
 
     // Kiểm tra mode từ config
     if (shopeeConfig?.mode === "manual" && shopeeConfig.affiliate_id) {
-      return this.generateManualLink(cleanUrl, subId, shopeeConfig);
+      const trackingUrl = this.generateManualLink(cleanUrl, subId, shopeeConfig);
+      return {
+        shortLink: trackingUrl,  // In manual mode, shortLink = trackingUrl
+        originalUrl: url,
+        cleanUrl,
+        trackingUrl,
+      };
     }
 
-    // API Mode (hoặc Mock nếu chưa có config)
-    return this.generateApiLink(cleanUrl, subId);
+    // API Mode (Mock)
+    const trackingUrl = await this.generateApiLink(cleanUrl, subId);
+    return {
+      shortLink: trackingUrl,
+      originalUrl: url,
+      cleanUrl,
+      trackingUrl,
+    };
+  }
+
+  /**
+   * Tạo link qua External Shopee API
+   * Gọi API bên thứ 3 để lấy link affiliate chính chủ
+   */
+  private async generateExternalApiLink(
+    url: string,
+    subId: string,
+    config: ShopeePlatformConfig
+  ): Promise<AdapterLinkResult> {
+    try {
+      const apiUrl = `${config.external_api_url}?url=${encodeURIComponent(url)}`;
+      console.log("[ShopeeAdapter] Calling External API:", apiUrl);
+
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; CKAffiliate/1.0)",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Parse response: data.data.data.batchCustomLink[0]
+      const linkData = data?.data?.data?.batchCustomLink?.[0];
+
+      if (!linkData?.shortLink || !linkData?.longLink) {
+        throw new Error("Invalid API response structure");
+      }
+
+      const { shortLink, longLink } = linkData;
+
+      // Clean the longLink (remove query params)
+      const cleanUrl = this.removeQueryParams(longLink);
+
+      // Build trackingUrl with our affiliate params
+      const trackingUrl = this.buildTrackingUrl(cleanUrl, config, subId);
+
+      console.log("[ShopeeAdapter] External API result:", { shortLink, longLink, cleanUrl });
+
+      return {
+        shortLink,           // Link for "Mở để mua hàng"
+        originalUrl: longLink,
+        cleanUrl,
+        trackingUrl,
+      };
+    } catch (error) {
+      console.error("[ShopeeAdapter] External API error:", error);
+      // Fallback to manual mode if API fails
+      console.log("[ShopeeAdapter] Falling back to manual mode");
+
+      const cleanUrl = await resolveAndCleanShopeeUrl(url);
+      const trackingUrl = config.affiliate_id
+        ? this.generateManualLink(cleanUrl, subId, config)
+        : url;
+
+      return {
+        shortLink: trackingUrl,
+        originalUrl: url,
+        cleanUrl,
+        trackingUrl,
+      };
+    }
+  }
+
+  /**
+   * Remove all query params from URL
+   */
+  private removeQueryParams(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      urlObj.search = "";
+      return urlObj.toString().replace(/\/$/, "");
+    } catch {
+      return url;
+    }
+  }
+
+  /**
+   * Build tracking URL with affiliate params
+   */
+  private buildTrackingUrl(cleanUrl: string, config: ShopeePlatformConfig, subId: string): string {
+    const encodedUrl = encodeURIComponent(cleanUrl);
+    const trackingTag = `${config.default_sub_id || "CK"}_${subId}`;
+    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
   }
 
   /**
@@ -315,7 +445,7 @@ export class TiktokAdapter implements IAffiliateAdapter {
   /**
    * Tạo link affiliate TikTok
    */
-  async generateLink(url: string, subId: string): Promise<string> {
+  async generateLink(url: string, subId: string): Promise<AdapterLinkResult> {
     await simulateApiDelay();
 
     // TODO: Khi có API thật:
@@ -329,7 +459,14 @@ export class TiktokAdapter implements IAffiliateAdapter {
 
     // Mock implementation
     const randomId = Math.random().toString(36).substring(2, 10);
-    return `https://vt.tiktok.com/ck${randomId}?sub_id=${subId}`;
+    const trackingUrl = `https://vt.tiktok.com/ck${randomId}?sub_id=${subId}`;
+
+    return {
+      shortLink: trackingUrl,
+      originalUrl: url,
+      cleanUrl: url,
+      trackingUrl,
+    };
   }
 
   /**
@@ -435,11 +572,11 @@ export async function generateShortLink(
   try {
     // 1. Detect platform từ URL
     const platform = detectPlatform(originalUrl);
-
+    console.log('originalUrl', originalUrl)
     if (!platform) {
       return {
         success: false,
-        error: "Link không hợp lệ. Chỉ hỗ trợ Shopee và TikTok.",
+        error: "Link không hợp lệ. Chỉ hỗ trợ Shopee và TikTok 2.",
       };
     }
 
@@ -460,8 +597,8 @@ export async function generateShortLink(
     const trackingId = userId || guestSessionId || "anon";
     const subId = generateSubId(userId, guestSessionId);
 
-    // 5. Gọi adapter để tạo link platform (this becomes trackingUrl)
-    const trackingUrl = await adapter.generateLink(
+    // 5. Gọi adapter để tạo link platform
+    const adapterResult = await adapter.generateLink(
       originalUrl,
       platformConfig?.mode === "manual" ? trackingId : subId,
       platformConfig || undefined
@@ -470,23 +607,31 @@ export async function generateShortLink(
     // 6. Generate unique code for internal shortener
     const code = await generateUniqueCode(5);
 
-    // 7. Build internal short link
+    // 7. Build internal short link (our domain)
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-    const shortLink = `${baseUrl}/${code}`;
+    const internalShortLink = `${baseUrl}/${code}`;
 
-    // 8. Lấy thông tin sản phẩm
-    const productInfo = await adapter.getProductInfo(originalUrl);
+    // 8. Lấy thông tin sản phẩm, hoa hồng và title song song
+    const [productInfo, estCommission, productTitle] = await Promise.all([
+      adapter.getProductInfo(originalUrl),
+      platform === "shopee"
+        ? fetchCommissionEstimate(adapterResult.cleanUrl || originalUrl)
+        : Promise.resolve(0),
+      fetchProductTitle(originalUrl),
+    ]);
 
     return {
       success: true,
       data: {
-        shortLink,
-        trackingUrl,
+        shortLink: adapterResult.shortLink,  // For "Mở để mua hàng" button
+        trackingUrl: adapterResult.trackingUrl,  // For redirect tracking
         code,
-        originalUrl,
+        originalUrl: adapterResult.originalUrl,
         platform,
         subId: platformConfig?.mode === "manual" ? trackingId : subId,
         productInfo,
+        estCommission,
+        productTitle,
       },
     };
   } catch (error) {
@@ -496,6 +641,160 @@ export async function generateShortLink(
       success: false,
       error: "Hệ thống đang bảo trì, vui lòng thử lại sau.",
     };
+  }
+}
+
+/**
+ * Fetch product title from URL by scraping HTML
+ * @param url - Product URL
+ * @returns Product title or empty string if failed
+ */
+async function fetchProductTitle(url: string): Promise<string> {
+  try {
+    console.log("[ProductTitle] Fetching:", url);
+
+    // Headers for Shopee web scraping
+    const SHOPEE_WEB_HEADERS: Record<string, string> = {
+      "Accept": "*/*",
+      "Accept-Language": "vi-VN,vi,fr-FR,fr,en-US,en",
+      "Cookie": "_gcl_au=1.1.1938669037.1768445152; _fbp=fb.1.1768445151925.956097763683165704; csrftoken=pGzPnDZaG07bt8nUXAMy2wGMBR4LJCik; SPC_F=q1J152rtJHgdmDdgYs6ckM1lrHonTB6F; REC_T_ID=52cf0799-f1bc-11f0-8873-429a790db211; language=vi; SPC_U=113429809; SPC_EC=.a1N0U0NzbUR1UnJHcmFtUB1hNZTACR4+Bk42toe8+QW+XR9HxfxDwwYrDyKthZabPmwXfX/qCFJe/KOIzpxjXmmJ3GExqTtERAzUc36aA323P8fKHPfiIIk2vc02zj4bzKL1yzBS9cL3AEoHJhrZ2TIm1Sru3MJhDSeMA/DntNWyTkVVE8tYIK8EtnwICMx+zNDmKxna3iu1EO3i4tgaGG6oEXkA6LfrR+jiPzEUuixatHcDZ0Nzmpjhr8Uog1VL+mCzOSr7xBKaeHWyozl26A==",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      "Referer": "https://shopee.vn/",
+    };
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: SHOPEE_WEB_HEADERS,
+    });
+
+    if (!response.ok) {
+      console.error("[ProductTitle] HTTP error:", response.status);
+      return "";
+    }
+
+    const html = await response.text();
+
+    // Parse title from HTML using regex
+    // Handle: <title data-rh="true">Content | Shopee</title>
+    const titleMatch = html.match(/<title[^>]*>([\s\S]+?)<\/title>/i);
+    if (titleMatch && titleMatch[1]) {
+      // Clean up title - remove common suffixes
+      let title = titleMatch[1]
+        .replace(/\s*\|\s*Shopee.*$/i, "")
+        .replace(/\s*-\s*Shopee.*$/i, "")
+        .replace(/\s*\|\s*TikTok.*$/i, "")
+        .trim();
+
+      console.log("[ProductTitle] Found:", title);
+      return title;
+    }
+
+    console.log("[ProductTitle] No title found");
+    return "";
+  } catch (error) {
+    console.error("[ProductTitle] Error:", error);
+    return "";
+  }
+}
+
+/**
+ * Parse commission text to number
+ * "₫12.255" or "₫51.450" -> 12255 or 51450
+ */
+function parseCommissionText(text: string): number {
+  if (!text) return 0;
+
+  const cleanedText = text
+    .replace(/[₫đ]/g, "")     // Remove currency symbols
+    .replace(/\./g, "")        // Remove thousand separators (dots)
+    .replace(/,/g, "")         // Remove commas if any
+    .trim();
+
+  const amount = parseInt(cleanedText, 10);
+  return isNaN(amount) ? 0 : amount;
+}
+
+/**
+ * Lấy hoa hồng ước tính từ Shopee API
+ * @param url - URL sản phẩm Shopee (clean URL preferred)
+ * @returns Số tiền hoa hồng (VND) hoặc 0 nếu không lấy được
+ */
+export async function fetchCommissionEstimate(url: string): Promise<number> {
+  try {
+    const apiUrl = `https://mall.shopee.vn/api/v4/generic_sharing/get_sharing_info?url=${encodeURIComponent(url)}`;
+
+    console.log("[CommissionEstimate] Fetching:", apiUrl);
+
+    // Full headers from Shopee app with authentication tokens
+    const SHOPEE_HEADERS: Record<string, string> = {
+      "Accept": "*/*",
+      "af-ac-enc-sz-token": "MBDgk/6DllcxbuHnbfNCUw==|j42txkZRUqmZBFbfsrBsPkjsFw19MkjUSQA/SxcSPZ/Kj9cDRjY5awzfTcyxsmbQ7EngDWvWFiSTgbXunc1yDwNo|kGzKecUa8t0oRtmp|08|2",
+      "Accept-Language": "vi-VN,vi,fr-FR,fr,en-US,en",
+      "x-api-source": "rn",
+      "User-Agent": "iOS app iPhone Shopee appver=36649 language=vi app_type=1 platform=native_ios os_ver=26.0.1 Cronet/102.0.5005.61",
+      "5bbab827": "jIpXGoxgIcL/NEY5B3u2oWPTvLr0wX3KSCoOiF5OTsDqroLq9sQxejskfIfVWgTHdQOg2XfoZDzQm3MCP2rwN+5Q65KEnn/mOXExkY1sr4yJxA2xpC7fJbuCTN+gzAwk0LteTRu9JWil9JDkLXJu+tjFweeGOmYK1rDeJYoPhF26w2SCU3GiJl2YCYNEJ3lJnNGQZHcyGrjsr+sugVqBSnd83kdb4E9WGEbHG1ZY9dbU4kmUsO6u6H58lXlWlKh3QZ3fo+0DCpyZlGu9Y/ycpeCpme/dXMyy5fsZ4EPIbxelNJcP3r+iVDcneoNtn+FHpE1nQyEaeCzM0sTYegy5PyM/Oix3q8WOyfjyfg/cWe1/5clhaFxa4CbHdhfB1EHCVArFcap3ffUsFjhqWaj3FA7kuXmW6kkooGllvjVoUdh/fxBbYu3kgOaxDsrUNIUWug43PVs5diMeoCunQSzO9gkF/X1m4MHwmdmis3fSRajaHMFURKANMujkcPFIkhHZXhXSxI+8cwLrpT25vtAyYZag/dl5TMKUdaAED2+xXTLLo9aUBywYvNvqnIaa606TdKHQKXllvxncX7IAiRRLH5bS+4Yb9mx+09a7g/mw+ugZkgriGGDnCapu5PVIjMRQXEtq2ESMsvRUVMCApkzbniFXeOwbmLGf2vSUSuQe7de3ArPWOhlnDkBXmbtRJDNpYMNWdOKiwsCBFQsamWyoW/VYaSXUUUAj52rbdS5HJZcpezrdb39NI6DMTZprpY1CelwcpuyRA8Npff23//z6auzXrADHIC8H0yN+KHOYBc79BYGAPQTPiJJneaW/pchHl2eCHGOFhjz+y3vG/m4Heb7jtI6trIAshZoknClkcLU5Ixx3/Rz5U3CFW5/044d5/ZFNEfbOHhn+TC8iuy6zg75SVK7z6Eroo9RspjQvRKPBvQ5qAGkX0XpiceiP04TQFFaeduse4YW3LnO/j/0i/rg3V+9rUXW9nTTUSla8cq86eE8Y2js1SekPgwQ7ID1WWiZIm5aATudOjuMk",
+      "Referer": "https://mall.shopee.vn/",
+      "Accept-Encoding": "gzip, deflate, br",
+      "x-sap-ri": "ebec6d69175082e40a9cbe23014c97ba3dc3198d127c38acc479",
+      "Connection": "keep-alive",
+      "Client-Request-Id": "d9f2f93a-71aa-41e9-a482-2f155ab23384.1065",
+      "d43474c9": "aRicRrvVp5/IwXxg615bUE88qNj=",
+      "Cookie": "REC_T_ID=7274c643-ec27-11ef-9c4c-06e1657ebf70; _ga_FV78QC1144=GS2.1.s1768479694$o2$g1$t1768480524$j60$l0$h0; _gcl_au=1.1.749893264.1768479656; _fbp=fb.1.1749621671337.424792997825787977; _ga_4GPP1ZXG63=GS2.1.s1768811715$o3$g0$t1768811715$j60$l1$h391112625; _ga=GA1.1.1896758253.1749621857; _ga_VYF4T4BCNH=GS2.1.s1768576274$o10$g0$t1768576274$j60$l0$h0; SPC_SEC_SI=v1-T056Rmt1TlZBZkxBVHIzNqH1G6Lq7KiM9B+0exfHyhnOtmjfmcJdhRGeD2KVYwzhsrQiBSw5ubaqo08RMqnsYNZtDc16a2JO2Y6CvD0Qozk=; SPC_DH=EU/D5B9XyFr1nfcaeCP9/jn2tf43o0EuLuYlA5m44x3KhDtOtSAjtzMtlWtQBPLJqcnbdgAcJA==.1kmphko.e25e0b2c; SPC_F=91762F7B39544496A68BBB5A670F23B8; SPC_DID=91762F7B39544496A68BBB5A670F23B8; SPC_RNBV=6087006; language=vi; shopee_app_version=36649; shopee_rn_bundle_version=6087006; shopee_rn_version=1767772259; shopee_token=EUQcG0K3Zko/0SUL0irwIkqowMXlteYVYd9eRgqJeSiA1ImP/esTXEfAU0mYYECU5CfWvSnIC6gT5kQx0Mc3; shopid=113428211; userid=113429809; username=cukinacha; SPC_AFTID=LAT; SPC_CLIENTID=MUFFRDYxNERFMUM0sdkptjpxxhiorzjo; csrftoken=A6z5sTTZg4BBn8nlXGYPPoFG7CLWX1fP; SPC_U=113429809",
+      "3cbecbcf": "5ZIAx/csCzpQ/IHD/cmTJzvoN/T=",
+      "X-Shopee-Client-Timezone": "Asia/Ho_Chi_Minh",
+      "Host": "mall.shopee.vn",
+    };
+
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: SHOPEE_HEADERS,
+    });
+
+    if (!response.ok) {
+      console.error("[CommissionEstimate] API error:", response.status);
+      return 0;
+    }
+
+    const data = await response.json();
+
+    // Check for API error or non-affiliate products
+    if (data?.error !== 0 || data?.data?.affiliate_status !== 1) {
+      console.log("[CommissionEstimate] Product not affiliated or API error:", data?.error);
+      return 0;
+    }
+
+    // Check if banner is available
+    if (!data?.data?.sharing_banner?.show_banner) {
+      console.log("[CommissionEstimate] No commission banner available");
+      return 0;
+    }
+
+    // Parse: data.data.sharing_banner.sections[0].content[last].text
+    const sections = data.data.sharing_banner.sections;
+    if (!sections || sections.length === 0) {
+      console.log("[CommissionEstimate] No sections found");
+      return 0;
+    }
+
+    const content = sections[0]?.content;
+    if (!content || content.length === 0) {
+      console.log("[CommissionEstimate] No content found");
+      return 0;
+    }
+
+    // Lấy phần tử cuối cùng
+    const lastItem = content[content.length - 1];
+    const text = lastItem?.text || "";
+
+    console.log("[CommissionEstimate] Raw text:", text);
+
+    const amount = parseCommissionText(text);
+    console.log("[CommissionEstimate] Parsed amount:", amount);
+    return amount;
+
+  } catch (error) {
+    console.error("[CommissionEstimate] Error:", error);
+    return 0;
   }
 }
 

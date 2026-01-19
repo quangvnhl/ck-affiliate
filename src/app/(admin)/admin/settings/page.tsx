@@ -14,6 +14,8 @@ import {
     Key,
     AlertCircle,
     Link2,
+    Globe,
+    Radio,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -204,6 +206,14 @@ function PlatformCard({
         apiSecret: "",
     });
 
+    // Link generation method (only for Shopee)
+    const [linkGenMethod, setLinkGenMethod] = useState<"system_default" | "shopee_api">(
+        platform.apiConfig?.link_gen_method || "system_default"
+    );
+    const [externalApiUrl, setExternalApiUrl] = useState(
+        platform.apiConfig?.external_api_url || ""
+    );
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -228,10 +238,22 @@ function PlatformCard({
                 return;
             }
 
+            // Validate external API URL if using shopee_api
+            if (platform.name === "shopee" && linkGenMethod === "shopee_api" && !externalApiUrl.trim()) {
+                setError("Vui lòng nhập API URL");
+                setIsSubmitting(false);
+                return;
+            }
+
             config.apiConfig = {
                 mode: "manual",
                 affiliate_id: manualConfig.affiliate_id.trim(),
                 default_sub_id: manualConfig.default_sub_id.trim() || "CK",
+                // Add link generation settings for Shopee
+                ...(platform.name === "shopee" && {
+                    link_gen_method: linkGenMethod,
+                    external_api_url: linkGenMethod === "shopee_api" ? externalApiUrl.trim() : undefined,
+                }),
             };
         } else {
             // API Mode - include API credentials if filled
@@ -339,8 +361,8 @@ function PlatformCard({
                                 type="button"
                                 onClick={() => setConfigMode("manual")}
                                 className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${configMode === "manual"
-                                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/50"
-                                        : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
+                                    ? "bg-orange-500/20 text-orange-400 border border-orange-500/50"
+                                    : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
                                     }`}
                             >
                                 <Link2 className="h-4 w-4 inline-block mr-2" />
@@ -350,8 +372,8 @@ function PlatformCard({
                                 type="button"
                                 onClick={() => setConfigMode("api")}
                                 className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${configMode === "api"
-                                        ? "bg-blue-500/20 text-blue-400 border border-blue-500/50"
-                                        : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
+                                    ? "bg-blue-500/20 text-blue-400 border border-blue-500/50"
+                                    : "bg-slate-700/50 text-slate-400 border border-slate-700 hover:bg-slate-700"
                                     }`}
                             >
                                 <Key className="h-4 w-4 inline-block mr-2" />
@@ -392,6 +414,65 @@ function PlatformCard({
                                     Format: {manualConfig.default_sub_id || "CK"}_{"<userId>"}
                                 </p>
                             </div>
+
+                            {/* Link Generation Method - Only for Shopee */}
+                            {platform.name === "shopee" && (
+                                <div className="mt-4 pt-4 border-t border-slate-700">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Globe className="h-4 w-4 text-green-400" />
+                                        <span className="text-sm font-medium text-slate-300">Phương thức tạo link</span>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="flex items-center gap-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700 cursor-pointer hover:border-slate-600 transition-colors">
+                                            <input
+                                                type="radio"
+                                                name="linkGenMethod"
+                                                value="system_default"
+                                                checked={linkGenMethod === "system_default"}
+                                                onChange={() => setLinkGenMethod("system_default")}
+                                                className="w-4 h-4 text-green-500"
+                                            />
+                                            <div>
+                                                <span className="text-sm text-slate-200">Hệ thống tự tạo</span>
+                                                <p className="text-xs text-slate-500">Sử dụng logic mặc định của hệ thống</p>
+                                            </div>
+                                        </label>
+
+                                        <label className="flex items-center gap-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700 cursor-pointer hover:border-slate-600 transition-colors">
+                                            <input
+                                                type="radio"
+                                                name="linkGenMethod"
+                                                value="shopee_api"
+                                                checked={linkGenMethod === "shopee_api"}
+                                                onChange={() => setLinkGenMethod("shopee_api")}
+                                                className="w-4 h-4 text-green-500"
+                                            />
+                                            <div>
+                                                <span className="text-sm text-slate-200">Shopee API (External)</span>
+                                                <p className="text-xs text-slate-500">Gọi API bên thứ 3 để lấy link Shopee</p>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    {/* External API URL Input */}
+                                    {linkGenMethod === "shopee_api" && (
+                                        <div className="mt-3">
+                                            <label className="text-xs text-slate-500 mb-1 block">API Endpoint URL *</label>
+                                            <Input
+                                                type="url"
+                                                placeholder="https://example.com/api/get-link"
+                                                value={externalApiUrl}
+                                                onChange={(e) => setExternalApiUrl(e.target.value)}
+                                                className="bg-slate-900 border-slate-700 text-slate-50 placeholder:text-slate-600"
+                                            />
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                API sẽ được gọi: {externalApiUrl || "..."}?url={"<product_url>"}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 

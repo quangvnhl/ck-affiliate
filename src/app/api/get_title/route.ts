@@ -1,0 +1,68 @@
+"use server";
+
+import { NextRequest, NextResponse } from "next/server";
+
+// Headers for Shopee web scraping
+const SHOPEE_WEB_HEADERS: Record<string, string> = {
+    "Accept": "*/*",
+    "Accept-Language": "vi-VN,vi,fr-FR,fr,en-US,en",
+    "Cookie": "_gcl_au=1.1.1938669037.1768445152; _fbp=fb.1.1768445151925.956097763683165704; csrftoken=pGzPnDZaG07bt8nUXAMy2wGMBR4LJCik; _sapid=e5716eddf7de9dbbe02ca2dfae26ec97ca9e22ed72e32b8df1553867; SPC_DT_TRANSLATED=0; _QPWSDCXHZQA=2d6a7868-daf9-416c-813a-8e6e0e206f96; REC7iLP4Q=395b6327-aa4e-4c8b-8924-d43aaf1bb12c; SPC_F=q1J152rtJHgdmDdgYs6ckM1lrHonTB6F; REC_T_ID=52cf0799-f1bc-11f0-8873-429a790db211; SPC_CLIENTID=cTFKMTUycnRKSGdkrmqtfpfsklaayauu; language=vi; SPC_ST=.VU00T3RvbVltMk1NZmlCNdOQbcbl6B+0x8OGYNCSPFdSocyyppE+AbqSul2LDC+7nMmYzOs95juvct6VwhFaE862bjikUjQ7TDQYezwzxHjI7Mvh3ZjmpDsy336mkh91BoKnWiWmkhvCTn1Y/4zC/146mtIfFBlKZmj2BwM16VnEzNnRotTmYO55ciQ+kGheztQhIixhF0MYCOj83/bLzFyJIs8Va5bHkpC3GxTaQRE/BREE1if91uPR0ei/Pl5gvv/9EzgQIc9rzmm0qx5f1Q==; SPC_U=113429809; SPC_T_ID=aFcBRys6O9l8phCf1Q9SwBhmPCnkxsV05JjZjlmenQAb7LsKgkFME5uS6CbvDFCynO/RNC9U42m2ZdorBZtwv6IfR5MoLqi5G1JsANOQ90akIVrivQeWSeGech4wMdjQ/Ev9ro0TvOwlN+8s7yJFjlU25VGEZvtx8HfFjxvQ96k=; SPC_T_IV=d0s2MjQwTVpwQmZyaDdaRQ==; SPC_R_T_ID=aFcBRys6O9l8phCf1Q9SwBhmPCnkxsV05JjZjlmenQAb7LsKgkFME5uS6CbvDFCynO/RNC9U42m2ZdorBZtwv6IfR5MoLqi5G1JsANOQ90akIVrivQeWSeGech4wMdjQ/Ev9ro0TvOwlN+8s7yJFjlU25VGEZvtx8HfFjxvQ96k=; SPC_R_T_IV=d0s2MjQwTVpwQmZyaDdaRQ==; SPC_CDS_CHAT=fcadb93f-645a-453d-b716-24dd1022d1d5; SPC_IA=1; _hjSessionUser_868286=eyJpZCI6ImZhZDIxNGQzLTU1NjYtNTQxZC1iYWViLTdhNTg3MDljNDRmYyIsImNyZWF0ZWQiOjE3Njg0NDY3MDA1MTMsImV4aXN0aW5nIjp0cnVlfQ==; SPC_SC_SESSION=gIATTkVkHTEQhxxnk6o3pv+M1kLhwB+ybrtHFcDN+9AwEUZGSBg1ZnKd+SLZt63r59MTuY9Vt67W4IJPonjLZh46aUwZTJXiS5/E0mO4PVw6orZblLVe5bx9qdVnjHQ7ikRJvWSFaLmbLowbeTvV7bY8l1TwMcx1UyeCDgx1xZiBwoaiqMVehXCAgg6gquMi6YhZn+ujnvnYy0XW3Cc8pxITqG1+NqE03+ulS2QdbPT6L/aSSE4IZs2634DMTmGfP7cAIrR8/K2/T/qw1K4roCA==_1_113429809; SPC_SC_MAIN_SHOP_SA_UD=0; SPC_STK=2balWez0ylKi+PcJm4pORaSkb/4pMkH2m9U0PZGsua9OehQFQEaYTRTThbMycTWN+JkcIrWgqyomIrE+jrfa2Jd616nIw+Qq2gv035KN7K5GrL7MIH07N009cmWED+DynPhWTI5vGMRjiZHHlCxSBfMme6KZGzbLrD8zxdL92DbWaqSS3PqIm5TDU9eqfnoi68mb3g1M4VczUGoBrNi8/YwE0ltEJz56vF4sx5JtZ/pnVkkGEhEbWMzenzF7Ln+hon8d/iunASHVy8g4NRIW4q2YpgS+dA/lTIxalaOUWg4VV9Sp+2oBCjjmk5RMdxbYe8xDc2tBrkV0Fhqr+shonF8lZunUW7SH50o501AJAn2lUWtnCPk+7YX9wIVl5FXmnjuSYQmRJkt+fFfBcL2LwnDza+Qajh7813Km3hr+rY5G9mg+/+wwwf2umZOKbWDsPDtFMbLk/UXZC1GANpJEfx133v3Psixi7m1Hl8E3yFET/yUcC6ch8jksbyXAm8Vd; SC_DFP=ecVDstwqrIOLhinwQSJRwRFrLRqtWWGN; _ga_3XVGTY3603=GS2.1.s1768537593$o1$g1$t1768537637$j16$l0$h0; _fbc=fb.1.1768537931033.IwZXh0bgNhZW0CMTEAc3J0YwZhcHBfaWQBMAABHmTW9HTuR1sguinbNLkdgrPJOAXum-WiOm2x1OoOu8qSFN8TxSF57dvRI0Bx_aem_eg43UO0zsJXA1UjA0tOy-w; _ga_FV78QC1144=GS2.1.s1768552513$o5$g0$t1768552513$j60$l0$h0; _gid=GA1.2.86627461.1768791879; SPC_SI=8lBTaQAAAABjUEZlNnVtSJlrlwEAAAAAa29LUWI4TGg=; SPC_SEC_SI=v1-NldQbjBydkVEWWhXY0hCTm/4cM+fABfBzwEWjgbOemoZUnRADbZazRW5Kpyid+ePBGaYYfDrHRk2MRIDZgz5pd+xhUKfdT+phO6dSQKPSYU=; _med=affiliates; _ga_TEVYGNDY1K=GS2.1.s1768808322$o3$g1$t1768809199$j58$l0$h0; AMP_TOKEN=%24NOT_FOUND; _hjSession_868286=eyJpZCI6ImE2ODQ0NTMyLTI1NjUtNGRhMC1iOTIxLTZiZmVjODY5NGQxOCIsImMiOjE3Njg4MjEyMDE5MTIsInMiOjAsInIiOjAsInNiIjowLCJzciI6MCwic2UiOjAsImZzIjowfQ==; _ga=GA1.2.916770992.1768445152; shopee_webUnique_ccd=eyptdQpRqcI5jHuSCSqM4w%3D%3D%7CKqNLKI%2Be2Cg231U%2BbbM0Df12rXA3ZMIcK%2FhW1kjAHMjgDAvRtNuG%2FOAm6JpdNveV%2FFucbgb4vBg%3D%7CqTPWuiCkc7zmZ57a%7C08%7C3; ds=6005dc24f6e4cbe8f379bf460d69ff8b; _ga_4GPP1ZXG63=GS2.1.s1768820516$o21$g1$t1768821348$j43$l1$h1008956671; SPC_EC=.a1N0U0NzbUR1UnJHcmFtUB1hNZTACR4+Bk42toe8+QW+XR9HxfxDwwYrDyKthZabPmwXfX\/qCFJe\/KOIzpxjXmmJ3GExqTtERAzUc36aA323P8fKHPfiIIk2vc02zj4bzKL1yzBS9cL3AEoHJhrZ2TIm1Sru3MJhDSeMA/DntNWyTkVVE8tYIK8EtnwICMx+zNDmKxna3iu1EO3i4tgaGG6oEXkA6LfrR+jiPzEUuixatHcDZ0Nzmpjhr8Uog1VL+mCzOSr7xBKaeHWyozl26A==",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Referer": "https://shopee.vn/",
+};
+
+/**
+ * GET /api/get_title?url={product_url}
+ * Test endpoint to debug product title scraping
+ */
+export async function GET(request: NextRequest) {
+    const searchParams = request.nextUrl.searchParams;
+    const url = searchParams.get("url");
+
+    if (!url) {
+        return NextResponse.json(
+            { error: "Missing 'url' query parameter" },
+            { status: 400 }
+        );
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: "GET",
+            headers: SHOPEE_WEB_HEADERS,
+        });
+
+        if (!response.ok) {
+            return NextResponse.json(
+                { error: "Failed to fetch URL", status: response.status },
+                { status: 500 }
+            );
+        }
+
+        const html = await response.text();
+        console.log(html);
+
+        // Parse title from HTML
+        const titleMatch = html.match(/<title[^>]*>([\s\S]+?)<\/title>/i);
+        const rawTitle = titleMatch?.[1] || "";
+
+        // Clean up title
+        const cleanTitle = rawTitle
+            .replace(/\s*\|\s*Shopee.*$/i, "")
+            .replace(/\s*-\s*Shopee.*$/i, "")
+            .replace(/\s*\|\s*TikTok.*$/i, "")
+            .trim();
+
+        return NextResponse.json({
+            url,
+            raw_title: rawTitle,
+            clean_title: cleanTitle,
+            html_length: html.length,
+        });
+    } catch (error) {
+        return NextResponse.json(
+            { error: "Failed to fetch", details: String(error) },
+            { status: 500 }
+        );
+    }
+}
