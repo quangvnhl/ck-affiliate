@@ -563,16 +563,18 @@ export const AffiliateAdapterFactory = new AffiliateAdapterFactoryClass();
 /**
  * Tạo link affiliate rút gọn
  * Sử dụng Adapter Pattern qua Factory
+ * @param linkMode - "quick" (manual link, no resolve/commission/title) or "standard" (full flow)
  */
 export async function generateShortLink(
   originalUrl: string,
   userId?: string,
-  guestSessionId?: string
+  guestSessionId?: string,
+  linkMode: "quick" | "standard" = "quick"
 ): Promise<Result<GeneratedLinkResult>> {
   try {
     // 1. Detect platform từ URL
     const platform = detectPlatform(originalUrl);
-    console.log('originalUrl', originalUrl)
+    console.log('originalUrl', originalUrl, 'mode', linkMode)
     if (!platform) {
       return {
         success: false,
@@ -592,11 +594,37 @@ export async function generateShortLink(
     const adapter = AffiliateAdapterFactory.getAdapter(platform);
 
     // 4. Generate tracking ID
-    // Với Manual Mode: dùng userId/guestId trực tiếp (không thêm timestamp)
-    // Với API Mode: dùng subId format cũ
     const trackingId = userId || guestSessionId || "anon";
     const subId = generateSubId(userId, guestSessionId);
 
+    // 5. Generate unique code for internal shortener
+    const code = await generateUniqueCode(5);
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const internalShortLink = `${baseUrl}/${code}`;
+
+    // ===== QUICK MODE =====
+    if (linkMode === "quick" && platform === "shopee") {
+      const shopeeConfig = platformConfig as unknown as ShopeePlatformConfig | undefined;
+      if (shopeeConfig?.affiliate_id) {
+        const trackingTag = `${shopeeConfig.default_sub_id || "CK"}_${trackingId}`;
+        const encodedUrl = encodeURIComponent(originalUrl);
+        const trackingUrl = `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${shopeeConfig.affiliate_id}&sub_id=${trackingTag}`;
+
+        return {
+          success: true,
+          data: {
+            shortLink: internalShortLink,
+            trackingUrl,
+            code,
+            originalUrl,
+            platform,
+            subId: trackingId,
+          },
+        };
+      }
+    }
+
+    // ===== STANDARD MODE =====
     // 5. Gọi adapter để tạo link platform
     const adapterResult = await adapter.generateLink(
       originalUrl,
@@ -604,14 +632,7 @@ export async function generateShortLink(
       platformConfig || undefined
     );
 
-    // 6. Generate unique code for internal shortener
-    const code = await generateUniqueCode(5);
-
-    // 7. Build internal short link (our domain)
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-    const internalShortLink = `${baseUrl}/${code}`;
-
-    // 8. Lấy thông tin sản phẩm, hoa hồng và title song song
+    // 6. Lấy thông tin sản phẩm, hoa hồng và title song song
     const [productInfo, estCommission, productTitle] = await Promise.all([
       adapter.getProductInfo(originalUrl),
       platform === "shopee"
@@ -620,11 +641,14 @@ export async function generateShortLink(
       fetchProductTitle(originalUrl),
     ]);
 
+    // 7. Determine shortLink - fallback to internal short link if external API doesn't return one
+    const finalShortLink = adapterResult.shortLink || internalShortLink;
+
     return {
       success: true,
       data: {
-        shortLink: adapterResult.shortLink,  // For "Mở để mua hàng" button
-        trackingUrl: adapterResult.trackingUrl,  // For redirect tracking
+        shortLink: finalShortLink,
+        trackingUrl: adapterResult.trackingUrl,
         code,
         originalUrl: adapterResult.originalUrl,
         platform,

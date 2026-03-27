@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
         }
 
         const html = await response.text();
-        console.log(html);
+        // console.log(html);
 
         // Parse title from HTML
         const titleMatch = html.match(/<title[^>]*>([\s\S]+?)<\/title>/i);
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
             raw_title: rawTitle,
             clean_title: cleanTitle,
             html_length: html.length,
+            html: html
         });
     } catch (error) {
         return NextResponse.json(

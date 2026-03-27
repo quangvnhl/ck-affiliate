@@ -64,6 +64,9 @@ export default async function AdminLayout({
             <NavItem href="/admin/links/create" icon={Link2}>
               Thêm link
             </NavItem>
+            <NavItem href="/admin/links" icon={Link2}>
+              Quản lý Links
+            </NavItem>
             <NavItem href="/admin/settings" icon={Settings}>
               Cài đặt
             </NavItem>

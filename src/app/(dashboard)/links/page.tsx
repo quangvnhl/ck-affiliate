@@ -20,6 +20,7 @@ interface LinkItem {
   id: string;
   originalUrl: string;
   shortLink: string;
+  trackingUrl: string;
   clicks: number;
   createdAt: Date;
   platformId: number | null;
@@ -170,8 +171,21 @@ export default function LinksPage() {
                   </div>
 
                   {/* Original URL */}
-                  <p className="mt-1 text-sm text-slate-500 break-all text-ellipsis overflow-hidden line-clamp-2">
-                    {link.originalUrl}
+                  <p className="mt-1 flex items-center gap-2 flex-wrap">
+                    <a href={link.originalUrl} target="_blank" rel="noopener noreferrer" className="text-amber-600 bg-amber-100 px-3 py-2 rounded-lg hover:text-amber-700 font-medium">
+                      Original Url
+                    </a>
+                    {(() => {
+                      try {
+                        const url = new URL(link.trackingUrl);
+                        const subId = url.searchParams.get("sub_id");
+                        return subId ? (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-mono">
+                            {subId}
+                          </span>
+                        ) : null;
+                      } catch { return null; }
+                    })()}
                   </p>
                 </div>
 

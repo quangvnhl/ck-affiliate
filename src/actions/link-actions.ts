@@ -29,11 +29,12 @@ export async function createLinkAction(
     const session = await auth();
     const userId = session?.user?.id;
 
-    // 2. Parse và validate input với Zod
     const rawData = {
       originalUrl: (formData.get("originalUrl") as string)?.trim(),
       guestSessionId: formData.get("guestSessionId") as string | undefined,
     };
+
+    const linkMode = (formData.get("linkMode") as "quick" | "standard") || "quick";
 
     const validatedFields = createLinkSchema.safeParse(rawData);
 
@@ -78,7 +79,7 @@ export async function createLinkAction(
     const platformId = platformRecord[0].id;
 
     // 5. Gọi service để tạo short link
-    const result = await generateShortLink(originalUrl, userId, guestSessionId);
+    const result = await generateShortLink(originalUrl, userId, guestSessionId, linkMode);
 
     if (!result.success || !result.data) {
       return {
@@ -151,6 +152,7 @@ export async function getUserLinksAction() {
         id: affiliateLinks.id,
         originalUrl: affiliateLinks.originalUrl,
         shortLink: affiliateLinks.shortLink,
+        trackingUrl: affiliateLinks.trackingUrl,
         clicks: affiliateLinks.clicks,
         createdAt: affiliateLinks.createdAt,
         platformId: affiliateLinks.platformId,

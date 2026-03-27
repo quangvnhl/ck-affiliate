@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useCallback } from "react";
-import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard } from "lucide-react";
+import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export function HeroLinkGenerator() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [linkMode, setLinkMode] = useState<"quick" | "standard">("quick");
 
   // Zustand store
   const {
@@ -67,6 +68,7 @@ export function HeroLinkGenerator() {
         const formData = new FormData();
         formData.append("originalUrl", inputValue.trim());
         formData.append("guestSessionId", guestSessionId);
+        formData.append("linkMode", linkMode);
 
         // Gọi server action
         const result = await createLinkAction(formData);
@@ -210,6 +212,33 @@ export function HeroLinkGenerator() {
         )}
       </form>
 
+      {/* Link Mode Toggle - Switch */}
+      <div className="flex items-center justify-end gap-2 mt-3">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <span className="flex items-center gap-1 text-sm font-medium text-white/80">
+            <Zap className="h-3.5 w-3.5" />
+            Siêu nhanh
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={linkMode === "quick"}
+            onClick={() => setLinkMode(linkMode === "quick" ? "standard" : "quick")}
+            className={cn(
+              "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none",
+              linkMode === "quick" ? "bg-green-400" : "bg-white/30"
+            )}
+          >
+            <span
+              className={cn(
+                "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transition-transform",
+                linkMode === "quick" ? "translate-x-5" : "translate-x-0"
+              )}
+            />
+          </button>
+        </label>
+      </div>
+
       {/* Platform badges */}
       <div className="flex items-center justify-center gap-4 mt-4">
         <div className="text-white text-sm flex-none sm:flex-1 sm:block hidden">Tự động nhận diện:</div>
@@ -286,9 +315,9 @@ export function HeroLinkGenerator() {
               </div>
             )}
 
-            {/* Open Link Button */}
+            {/* Open Link Button - use trackingUrl in quick mode */}
             <a
-              href={generatedLink.shortLink}
+              href={generatedLink.trackingUrl || generatedLink.shortLink}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-lg rounded-lg transition-colors"
