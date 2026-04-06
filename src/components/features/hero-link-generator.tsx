@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useCallback } from "react";
-import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Zap } from "lucide-react";
+import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Zap, Share2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -325,6 +325,28 @@ export function HeroLinkGenerator() {
               <ShoppingCart className="h-6 w-6" />
               Mở để mua hàng
             </a>
+
+            {/* Share Button */}
+            <button
+              onClick={async () => {
+                const shareUrl = generatedLink.trackingUrl || generatedLink.shortLink;
+                const shareTitle = generatedLink.productTitle || "Xem sản phẩm này!";
+                if (navigator.share) {
+                  try {
+                    await navigator.share({ title: shareTitle, url: shareUrl });
+                  } catch (err) {
+                    // User cancelled share
+                  }
+                } else {
+                  await navigator.clipboard.writeText(shareUrl);
+                  toast.success("Đã copy link để chia sẻ!");
+                }
+              }}
+              className="mt-2 flex items-center justify-center gap-2 w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+            >
+              <Share2 className="h-5 w-5" />
+              Chia sẻ
+            </button>
 
             {/* Commission Estimation Box */}
             {generatedLink.estCommission && generatedLink.estCommission > 0 && (

@@ -339,9 +339,9 @@ export class ShopeeAdapter implements IAffiliateAdapter {
   /**
    * Build tracking URL with affiliate params
    */
-  private buildTrackingUrl(cleanUrl: string, config: ShopeePlatformConfig, subId: string): string {
+  private buildTrackingUrl(cleanUrl: string, config: ShopeePlatformConfig, subId: string, code: string = ""): string {
     const encodedUrl = encodeURIComponent(cleanUrl);
-    const trackingTag = `${config.default_sub_id || "CK"}_${subId}`;
+    const trackingTag = `${config.default_sub_id || "CK"}_${subId}_${code}`;
     return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
   }
 
@@ -349,12 +349,12 @@ export class ShopeeAdapter implements IAffiliateAdapter {
    * Tạo link thủ công theo công thức Universal Link
    * Công thức: https://s.shopee.vn/an_redir?origin_link={encoded}&affiliate_id={id}&sub_id={tracking}
    */
-  private generateManualLink(url: string, userId: string, config: ShopeePlatformConfig): string {
+  private generateManualLink(url: string, userId: string, config: ShopeePlatformConfig, code: string = ""): string {
     // Encode URL gốc
     const encodedUrl = encodeURIComponent(url);
 
     // Tạo tracking_tag: {default_sub_id}_{userId}
-    const trackingTag = `${config.default_sub_id || "CK"}_${userId}`;
+    const trackingTag = `${config.default_sub_id || "CK"}_${userId}_${code}`;
 
     // Ghép công thức
     return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
@@ -606,7 +606,7 @@ export async function generateShortLink(
     if (linkMode === "quick" && platform === "shopee") {
       const shopeeConfig = platformConfig as unknown as ShopeePlatformConfig | undefined;
       if (shopeeConfig?.affiliate_id) {
-        const trackingTag = `${shopeeConfig.default_sub_id || "CK"}_${trackingId}`;
+        const trackingTag = `${shopeeConfig.default_sub_id || "CK"}_${trackingId}_${code}`;
         const encodedUrl = encodeURIComponent(originalUrl);
         const trackingUrl = `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${shopeeConfig.affiliate_id}&sub_id=${trackingTag}`;
 

@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 import { db } from "@/db";
 import { affiliateLinks, platforms } from "@/db/schema";
@@ -159,7 +159,7 @@ export async function getUserLinksAction() {
       })
       .from(affiliateLinks)
       .where(eq(affiliateLinks.userId, session.user.id))
-      .orderBy(affiliateLinks.createdAt);
+      .orderBy(desc(affiliateLinks.createdAt));
 
     return { success: true, data: links };
   } catch (error) {

@@ -119,7 +119,7 @@ export default function AdminLinksPage() {
               <thead className="bg-slate-800 border-b border-slate-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Platform</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Short Link</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Links</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">SubId</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tạo bởi</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-slate-500 uppercase">Clicks</th>
@@ -137,11 +137,19 @@ export default function AdminLinksPage() {
                       </span>
                     </td>
 
-                    {/* Short Link */}
+                    {/* Links */}
                     <td className="px-4 py-3">
-                      <p className="text-sm text-amber-600 font-medium truncate max-w-[200px]" title={link.shortLink}>
-                        {link.shortLink}
-                      </p>
+                      <div className="space-y-1 max-w-[300px]">
+                        <p className="text-sm text-amber-400 font-medium truncate" title={link.shortLink}>
+                          {link.shortLink}
+                        </p>
+                        <p className="text-xs text-slate-400 truncate" title={link.originalUrl}>
+                          {link.originalUrl}
+                        </p>
+                        <p className="text-xs text-blue-400 truncate" title={link.trackingUrl}>
+                          {link.trackingUrl}
+                        </p>
+                      </div>
                     </td>
 
                     {/* SubId */}
