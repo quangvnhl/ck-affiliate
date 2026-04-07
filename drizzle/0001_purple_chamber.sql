@@ -1,0 +1,1 @@
+ALTER TABLE "affiliate_links" ADD COLUMN "clean_url" text;

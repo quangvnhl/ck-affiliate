@@ -98,6 +98,7 @@ export async function createLinkAction(
         shortLink: result.data.shortLink,
         code: result.data.code,
         trackingUrl: result.data.trackingUrl,
+        metaData: result.data.metaData || null,
         platformId,
         clicks: 0,
       })

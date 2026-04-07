@@ -28,11 +28,13 @@ export interface GeneratedLinkResult {
   trackingUrl: string;   // Platform affiliate URL (the actual redirect target)
   code: string;          // 5-char unique code for internal shortener
   originalUrl: string;
+  resolvedUrl?: string;  // Final URL after following all redirects
   platform: PlatformType;
   subId: string;
   productInfo?: ProductInfo;
   estCommission?: number; // Estimated commission from Shopee API (VND)
   productTitle?: string;  // Product title scraped from originalUrl
+  metaData?: Record<string, unknown>; // Metadata to store in DB
 }
 
 // Đơn hàng từ API sàn
@@ -606,9 +608,21 @@ export async function generateShortLink(
     if (linkMode === "quick" && platform === "shopee") {
       const shopeeConfig = platformConfig as unknown as ShopeePlatformConfig | undefined;
       if (shopeeConfig?.affiliate_id) {
+        // Resolve redirect chain to get final product URL
+        const resolvedUrl = await resolveRedirects(originalUrl);
+        const urlForTracking = resolvedUrl !== originalUrl ? resolvedUrl : originalUrl;
+
         const trackingTag = `${shopeeConfig.default_sub_id || "CK"}_${trackingId}_${code}`;
-        const encodedUrl = encodeURIComponent(originalUrl);
+        const encodedUrl = encodeURIComponent(urlForTracking);
         const trackingUrl = `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${shopeeConfig.affiliate_id}&sub_id=${trackingTag}`;
+
+        // Fetch title from resolved URL (non-blocking)
+        const productTitle = await fetchProductTitle(resolvedUrl);
+
+        const metaData: Record<string, unknown> = {
+          title: productTitle || undefined,
+          resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
+        };
 
         return {
           success: true,
@@ -617,32 +631,43 @@ export async function generateShortLink(
             trackingUrl,
             code,
             originalUrl,
+            resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
             platform,
             subId: trackingId,
+            productTitle,
+            metaData,
           },
         };
       }
     }
 
     // ===== STANDARD MODE =====
-    // 5. Gọi adapter để tạo link platform
+    // Resolve redirect chain first
+    const resolvedUrl = await resolveRedirects(originalUrl);
+
+    // 5. Gọi adapter để tạo link platform (use resolved URL)
     const adapterResult = await adapter.generateLink(
-      originalUrl,
+      resolvedUrl,
       platformConfig?.mode === "manual" ? trackingId : subId,
       platformConfig || undefined
     );
 
-    // 6. Lấy thông tin sản phẩm, hoa hồng và title song song
+    // 6. Lấy thông tin sản phẩm, hoa hồng và title song song (use resolved URL)
     const [productInfo, estCommission, productTitle] = await Promise.all([
-      adapter.getProductInfo(originalUrl),
+      adapter.getProductInfo(resolvedUrl),
       platform === "shopee"
-        ? fetchCommissionEstimate(adapterResult.cleanUrl || originalUrl)
+        ? fetchCommissionEstimate(adapterResult.cleanUrl || resolvedUrl)
         : Promise.resolve(0),
-      fetchProductTitle(originalUrl),
+      fetchProductTitle(resolvedUrl),
     ]);
 
     // 7. Determine shortLink - fallback to internal short link if external API doesn't return one
     const finalShortLink = adapterResult.shortLink || internalShortLink;
+
+    const metaData: Record<string, unknown> = {
+      title: productTitle || undefined,
+      resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
+    };
 
     return {
       success: true,
@@ -650,12 +675,14 @@ export async function generateShortLink(
         shortLink: finalShortLink,
         trackingUrl: adapterResult.trackingUrl,
         code,
-        originalUrl: adapterResult.originalUrl,
+        originalUrl,
+        resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
         platform,
         subId: platformConfig?.mode === "manual" ? trackingId : subId,
         productInfo,
         estCommission,
         productTitle,
+        metaData,
       },
     };
   } catch (error) {
@@ -666,6 +693,44 @@ export async function generateShortLink(
       error: "Hệ thống đang bảo trì, vui lòng thử lại sau.",
     };
   }
+}
+
+/**
+ * Follow redirect chain to get the final URL
+ * Follows up to maxRedirects hops (default 10)
+ */
+async function resolveRedirects(url: string, maxRedirects: number = 10): Promise<string> {
+  let currentUrl = url;
+
+  for (let i = 0; i < maxRedirects; i++) {
+    try {
+      const response = await fetch(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        },
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location) {
+          currentUrl = location.startsWith("http")
+            ? location
+            : new URL(location, currentUrl).toString();
+          console.log(`[ResolveRedirects] Hop ${i + 1}: ${currentUrl}`);
+          continue;
+        }
+      }
+      break;
+    } catch (error) {
+      console.error(`[ResolveRedirects] Error at hop ${i + 1}:`, error);
+      break;
+    }
+  }
+
+  console.log(`[ResolveRedirects] Final URL: ${currentUrl}`);
+  return currentUrl;
 }
 
 /**

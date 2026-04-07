@@ -71,6 +71,10 @@ export const affiliateLinks = pgTable(
     // Internal Shortener fields
     code: varchar("code", { length: 10 }).unique().notNull(), // Unique short code for redirect
     trackingUrl: text("tracking_url").notNull(), // Original platform affiliate link
+    cleanUrl: text("clean_url"), // Clean URL without query params (existing DB column)
+
+    // Metadata (title, resolved URL, etc.)
+    metaData: jsonb("meta_data"),
 
     clicks: integer("clicks").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
