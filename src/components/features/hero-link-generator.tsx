@@ -38,7 +38,7 @@ export function HeroLinkGenerator() {
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeData, setScrapeData] = useState<ScrapeResult["data"] | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
-  const [bgGeneratedLink, setBgGeneratedLink] = useState<CreateLinkResult["data"] | null>(null);
+  const [bgGeneratedLink, setBgGeneratedLink] = useState<CreateLinkResult | null>(null);
 
   // Zustand store
   const {
