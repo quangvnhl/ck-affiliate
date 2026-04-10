@@ -46,6 +46,11 @@ export async function createLinkAction(
 
     const { originalUrl, guestSessionId } = validatedFields.data;
 
+    // Metadata props
+    const rawUrl = (formData.get("rawUrl") as string)?.trim();
+    const scrapeTitle = (formData.get("scrapeTitle") as string)?.trim();
+    const scrapeImage = (formData.get("scrapeImage") as string)?.trim();
+
     // 3. Detect platform
     const platformType = detectPlatform(originalUrl);
     if (!platformType) {
@@ -89,6 +94,13 @@ export async function createLinkAction(
     }
 
     // 6. Lưu vào database
+    const finalMetaData: Record<string, unknown> = {
+      ...(result.data.metaData || {}),
+    };
+    if (rawUrl) finalMetaData.originalInputUrl = rawUrl;
+    if (scrapeTitle) finalMetaData.scrapeTitle = scrapeTitle;
+    if (scrapeImage) finalMetaData.scrapeImage = scrapeImage;
+
     const newLink = await db
       .insert(affiliateLinks)
       .values({
@@ -98,7 +110,7 @@ export async function createLinkAction(
         shortLink: result.data.shortLink,
         code: result.data.code,
         trackingUrl: result.data.trackingUrl,
-        metaData: result.data.metaData || null,
+        metaData: Object.keys(finalMetaData).length > 0 ? finalMetaData : null,
         platformId,
         clicks: 0,
       })

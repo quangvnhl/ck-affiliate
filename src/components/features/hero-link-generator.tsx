@@ -1,16 +1,27 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
-import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Zap, Share2 } from "lucide-react";
+import { useState, useTransition, useCallback, useEffect } from "react";
+import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Share2, Info } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useLinkStore } from "@/store/use-link-store";
-import { createLinkAction } from "@/actions/link-actions";
+import { createLinkAction, type CreateLinkResult } from "@/actions/link-actions";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/utils";
 import Image from "next/image";
+
+export interface ScrapeResult {
+  status: "success" | "error";
+  data?: {
+    title: string;
+    image: string;
+    shop_id: string;
+    product_id: string;
+    target_url: string;
+  };
+}
 
 // ============================================
 // COMPONENT: HeroLinkGenerator
@@ -22,7 +33,12 @@ export function HeroLinkGenerator() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [linkMode, setLinkMode] = useState<"quick" | "standard">("quick");
+
+  // Scraper & Background states
+  const [isScraping, setIsScraping] = useState(false);
+  const [scrapeData, setScrapeData] = useState<ScrapeResult["data"] | null>(null);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const [bgGeneratedLink, setBgGeneratedLink] = useState<CreateLinkResult["data"] | null>(null);
 
   // Zustand store
   const {
@@ -32,19 +48,87 @@ export function HeroLinkGenerator() {
     getOrCreateGuestSessionId
   } = useLinkStore();
 
+  const resetBackgroundStates = useCallback(() => {
+    setScrapeData(null);
+    setScrapeError(null);
+    setBgGeneratedLink(null);
+    setGeneratedLink(null);
+  }, [setGeneratedLink]);
+
+  const generateLinkInBackground = useCallback(async (targetUrl: string, apiMetadata?: ScrapeResult["data"], rawInputUrl?: string) => {
+    try {
+      const guestSessionId = getOrCreateGuestSessionId();
+      const formData = new FormData();
+      formData.append("originalUrl", targetUrl);
+      formData.append("guestSessionId", guestSessionId);
+      formData.append("linkMode", "standard");
+
+      // Append metadata
+      if (rawInputUrl) formData.append("rawUrl", rawInputUrl);
+      if (apiMetadata?.title) formData.append("scrapeTitle", apiMetadata.title);
+      if (apiMetadata?.image) formData.append("scrapeImage", apiMetadata.image);
+
+      const result = await createLinkAction(formData);
+      if (result.success && result.data) {
+        setBgGeneratedLink(result.data);
+      }
+    } catch (err) {
+      console.error("BG gen error:", err);
+    }
+  }, [getOrCreateGuestSessionId]);
+
+  const fetchScrapeData = useCallback(async (url: string) => {
+    setIsScraping(true);
+    resetBackgroundStates();
+
+    try {
+      const res = await fetch(`https://shpe-sc.cukinacha.com/scrape?url=${encodeURIComponent(url)}`);
+      const data: ScrapeResult = await res.json();
+      console.log(data);
+      if (data.status === "success" && data.data) {
+        if (data.data.title === "Not found") {
+          setScrapeError("Link không hợp lệ hoặc Không tìm thấy thông tin sản phẩm.");
+        } else {
+          setScrapeData(data.data);
+          // Kick off background generation using the target URL and metadata
+          generateLinkInBackground(data.data.target_url, data.data, url);
+        }
+      } else {
+        setScrapeError("Lỗi hệ thống khi tải dữ liệu sản phẩm bên thứ 3.");
+      }
+    } catch (error) {
+      console.error("Scrape API Error:", error);
+      setScrapeError("Không thể kết nối đến máy chủ Get Data.");
+    } finally {
+      setIsScraping(false);
+    }
+  }, [resetBackgroundStates, generateLinkInBackground]);
+
   // Handle paste - trim whitespace
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
     const pastedText = e.clipboardData.getData("text").trim();
-    setInputValue(pastedText);
-    setError(null);
-  }, []);
+    if (pastedText) {
+      setInputValue(pastedText);
+      setError(null);
+      if (pastedText.startsWith("http")) {
+        fetchScrapeData(pastedText);
+      } else {
+        resetBackgroundStates();
+      }
+    }
+  }, [fetchScrapeData, resetBackgroundStates]);
 
   // Handle input change
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(e.target.value);
+    const url = e.target.value;
+    setInputValue(url);
     setError(null);
-  }, []);
+    if (url.startsWith('http')) {
+      fetchScrapeData(url);
+    } else {
+      resetBackgroundStates();
+    }
+  }, [fetchScrapeData, resetBackgroundStates]);
 
   // Handle submit
   const handleSubmit = useCallback(async (e?: React.FormEvent) => {
@@ -55,22 +139,42 @@ export function HeroLinkGenerator() {
       return;
     }
 
-    // Reset state
-    setError(null);
-    setGeneratedLink(null);
+    if (scrapeError) {
+      setError(scrapeError);
+      return;
+    }
 
+    if (isScraping) {
+      toast.info("Vui lòng đợi tải thông tin sản phẩm...");
+      return;
+    }
+
+    setError(null);
+
+    // If already generated in background, just show it
+    if (bgGeneratedLink) {
+      setGeneratedLink(bgGeneratedLink);
+      addToHistory(bgGeneratedLink);
+      toast.success("Tạo link thành công!");
+      return;
+    }
+
+    // Fallback if background creation failed or input changed
     startTransition(async () => {
       try {
-        // Lấy hoặc tạo guest session ID
         const guestSessionId = getOrCreateGuestSessionId();
-
-        // Tạo FormData
         const formData = new FormData();
-        formData.append("originalUrl", inputValue.trim());
+        // If we have API data, use target_url, else use original input
+        formData.append("originalUrl", scrapeData?.target_url || inputValue.trim());
         formData.append("guestSessionId", guestSessionId);
-        formData.append("linkMode", linkMode);
+        formData.append("linkMode", "standard");
 
-        // Gọi server action
+        if (scrapeData) {
+          formData.append("rawUrl", inputValue.trim());
+          if (scrapeData.title) formData.append("scrapeTitle", scrapeData.title);
+          if (scrapeData.image) formData.append("scrapeImage", scrapeData.image);
+        }
+
         const result = await createLinkAction(formData);
 
         if (result.success && result.data) {
@@ -87,7 +191,7 @@ export function HeroLinkGenerator() {
         toast.error("Đã xảy ra lỗi, vui lòng thử lại");
       }
     });
-  }, [inputValue, getOrCreateGuestSessionId, setGeneratedLink, addToHistory]);
+  }, [inputValue, isScraping, scrapeData, scrapeError, bgGeneratedLink, getOrCreateGuestSessionId, setGeneratedLink, addToHistory]);
 
   // Handle Enter key
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -118,18 +222,23 @@ export function HeroLinkGenerator() {
         setInputValue(text.trim());
         setError(null);
         toast.success("Đã dán link!");
+        if (text.trim().startsWith("http")) {
+          fetchScrapeData(text.trim());
+        } else {
+          resetBackgroundStates();
+        }
       }
     } catch {
       toast.error("Không thể đọc clipboard. Vui lòng dán thủ công.");
     }
-  }, []);
+  }, [fetchScrapeData, resetBackgroundStates]);
 
   return (
     <div className="w-full max-w-2xl mx-auto px-4">
       {/* Headline */}
       <div className="text-center mb-8">
         <h1 className="text-3xl md:text-4xl font-bold mb-3 text-white">
-          Hoàn tiền mua sắm
+          Hoàn tiền tự động
         </h1>
         <div className="md:text-lg text-base text-amber-200 md:flex items-center gap-2 justify-center">
           <div className="md:block">Dán link Shopee/TikTok</div>
@@ -212,32 +321,42 @@ export function HeroLinkGenerator() {
         )}
       </form>
 
-      {/* Link Mode Toggle - Switch */}
-      <div className="flex items-center justify-end gap-2 mt-3">
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <span className="flex items-center gap-1 text-sm font-medium text-white/80">
-            <Zap className="h-3.5 w-3.5" />
-            Siêu nhanh
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={linkMode === "quick"}
-            onClick={() => setLinkMode(linkMode === "quick" ? "standard" : "quick")}
-            className={cn(
-              "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none",
-              linkMode === "quick" ? "bg-green-400" : "bg-white/30"
-            )}
-          >
-            <span
-              className={cn(
-                "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transition-transform",
-                linkMode === "quick" ? "translate-x-5" : "translate-x-0"
-              )}
-            />
-          </button>
-        </label>
-      </div>
+      {/* Preview Section */}
+      {(isScraping || scrapeData || scrapeError) && (
+        <div className="mt-4 p-4 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200/50 animate-in fade-in slide-in-from-top-2 duration-300">
+          {isScraping ? (
+            <div className="flex gap-4 animate-pulse">
+              <div className="w-20 h-20 bg-slate-200 rounded-lg shrink-0"></div>
+              <div className="flex-1 space-y-3 py-2">
+                <div className="h-4 bg-slate-200 rounded w-3/4"></div>
+                <div className="h-4 bg-slate-200 rounded w-1/2"></div>
+              </div>
+            </div>
+          ) : scrapeError ? (
+            <p className="text-sm text-red-500 flex items-center justify-center gap-2 font-medium">
+              <Info className="h-4 w-4" />
+              {scrapeError}
+            </p>
+          ) : scrapeData ? (
+            <div className="flex gap-4">
+              <img
+                src={`https://cf.shopee.vn/file/${scrapeData.image}`}
+                alt={scrapeData.title}
+                className="w-20 h-20 object-cover rounded-lg shrink-0 border border-slate-100 shadow-sm"
+              />
+              <div className="flex-1 py-1 flex flex-col justify-between">
+                <p className="text-sm font-semibold text-slate-800 line-clamp-2">
+                  {scrapeData.title}
+                </p>
+                {/* Future: Giá & Hoa hồng */}
+                <div className="text-xs text-slate-500 font-medium pb-1 flex items-center gap-1">
+                  <Check className="h-3.5 w-3.5 text-green-500" /> Tự động lấy thông tin thành công
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Platform badges */}
       <div className="flex items-center justify-center gap-4 mt-4">
@@ -348,23 +467,7 @@ export function HeroLinkGenerator() {
               Chia sẻ
             </button>
 
-            {/* Commission Estimation Box */}
-            {generatedLink.estCommission && generatedLink.estCommission > 0 && (
-              <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg">💰</span>
-                  <span className="text-sm font-medium text-green-800">
-                    Hoa hồng sàn: {formatCurrency(generatedLink.estCommission)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🎁</span>
-                  <span className="text-lg font-bold text-green-700">
-                    Hoàn lại cho bạn: {formatCurrency(Math.round(generatedLink.estCommission * 0.5))} - {formatCurrency(Math.round(generatedLink.estCommission * 0.8))}
-                  </span>
-                </div>
-              </div>
-            )}
+
 
             {/* Instruction Section */}
             <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">

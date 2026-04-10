@@ -341,25 +341,25 @@ export class ShopeeAdapter implements IAffiliateAdapter {
   /**
    * Build tracking URL with affiliate params
    */
-  private buildTrackingUrl(cleanUrl: string, config: ShopeePlatformConfig, subId: string, code: string = ""): string {
+  private buildTrackingUrl(cleanUrl: string, config: ShopeePlatformConfig, trackingTag: string): string {
     const encodedUrl = encodeURIComponent(cleanUrl);
-    const trackingTag = `${config.default_sub_id || "CK"}_${subId}_${code}`;
-    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
+    const finalTrackingTag = `${config.default_sub_id || "CK"}_${trackingTag}`;
+    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${finalTrackingTag}`;
   }
 
   /**
    * Tạo link thủ công theo công thức Universal Link
    * Công thức: https://s.shopee.vn/an_redir?origin_link={encoded}&affiliate_id={id}&sub_id={tracking}
    */
-  private generateManualLink(url: string, userId: string, config: ShopeePlatformConfig, code: string = ""): string {
+  private generateManualLink(url: string, trackingTag: string, config: ShopeePlatformConfig): string {
     // Encode URL gốc
     const encodedUrl = encodeURIComponent(url);
 
-    // Tạo tracking_tag: {default_sub_id}_{userId}
-    const trackingTag = `${config.default_sub_id || "CK"}_${userId}_${code}`;
+    // Tạo tracking_tag: {default_sub_id}_{tracking_tag}
+    const finalTrackingTag = `${config.default_sub_id || "CK"}_${trackingTag}`;
 
     // Ghép công thức
-    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${trackingTag}`;
+    return `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${config.affiliate_id}&sub_id=${finalTrackingTag}`;
   }
 
   /**
@@ -645,10 +645,13 @@ export async function generateShortLink(
     // Resolve redirect chain first
     const resolvedUrl = await resolveRedirects(originalUrl);
 
-    // 5. Gọi adapter để tạo link platform (use resolved URL)
+    // 5. Gọi adapter để tạo link platform với Tracking URL chứa mã code
+    const baseTrackingId = platformConfig?.mode === "manual" ? trackingId : subId;
+    const trackingTag = `${baseTrackingId}_${code}`;
+
     const adapterResult = await adapter.generateLink(
       resolvedUrl,
-      platformConfig?.mode === "manual" ? trackingId : subId,
+      trackingTag,
       platformConfig || undefined
     );
 
@@ -661,8 +664,8 @@ export async function generateShortLink(
       fetchProductTitle(resolvedUrl),
     ]);
 
-    // 7. Determine shortLink - fallback to internal short link if external API doesn't return one
-    const finalShortLink = adapterResult.shortLink || internalShortLink;
+    // 7. Determine shortLink - Force to use internal short link (dạng code)
+    const finalShortLink = internalShortLink;
 
     const metaData: Record<string, unknown> = {
       title: productTitle || undefined,
