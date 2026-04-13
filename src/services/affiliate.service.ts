@@ -168,9 +168,6 @@ export interface ShopeePlatformConfig {
   default_sub_id?: string;
   app_id?: string;
   secret?: string;
-  // New fields for link generation settings
-  link_gen_method?: "system_default" | "shopee_api";
-  external_api_url?: string;
 }
 
 // Result type for adapter generateLink
@@ -198,7 +195,7 @@ export class ShopeeAdapter implements IAffiliateAdapter {
 
   /**
    * Tạo link affiliate Shopee
-   * Hỗ trợ 3 mode: External API, Manual, và Mock API
+   * Hỗ trợ 2 mode: Manual và Mock API
    * @param url - URL gốc sản phẩm (có thể là link rút gọn)
    * @param subId - Tracking ID (userId hoặc guestId)
    * @param config - Optional config từ bảng platforms
@@ -209,12 +206,6 @@ export class ShopeeAdapter implements IAffiliateAdapter {
 
     // Cast config về ShopeePlatformConfig nếu có
     const shopeeConfig = config as ShopeePlatformConfig | undefined;
-
-    // Check if using External Shopee API
-    if (shopeeConfig?.link_gen_method === "shopee_api" && shopeeConfig.external_api_url) {
-      console.log("[ShopeeAdapter] Using External Shopee API mode");
-      return this.generateExternalApiLink(url, subId, shopeeConfig);
-    }
 
     // System Default mode - resolve short links first
     let cleanUrl = url;
@@ -255,74 +246,6 @@ export class ShopeeAdapter implements IAffiliateAdapter {
       cleanUrl,
       trackingUrl,
     };
-  }
-
-  /**
-   * Tạo link qua External Shopee API
-   * Gọi API bên thứ 3 để lấy link affiliate chính chủ
-   */
-  private async generateExternalApiLink(
-    url: string,
-    subId: string,
-    config: ShopeePlatformConfig
-  ): Promise<AdapterLinkResult> {
-    try {
-      const apiUrl = `${config.external_api_url}?url=${encodeURIComponent(url)}`;
-      console.log("[ShopeeAdapter] Calling External API:", apiUrl);
-
-      const response = await fetch(apiUrl, {
-        method: "GET",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; CKAffiliate/1.0)",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Parse response: data.data.data.batchCustomLink[0]
-      const linkData = data?.data?.data?.batchCustomLink?.[0];
-
-      if (!linkData?.shortLink || !linkData?.longLink) {
-        throw new Error("Invalid API response structure");
-      }
-
-      const { shortLink, longLink } = linkData;
-
-      // Clean the longLink (remove query params)
-      const cleanUrl = this.removeQueryParams(longLink);
-
-      // Build trackingUrl with our affiliate params
-      const trackingUrl = this.buildTrackingUrl(cleanUrl, config, subId);
-
-      console.log("[ShopeeAdapter] External API result:", { shortLink, longLink, cleanUrl });
-
-      return {
-        shortLink,           // Link for "Mở để mua hàng"
-        originalUrl: longLink,
-        cleanUrl,
-        trackingUrl,
-      };
-    } catch (error) {
-      console.error("[ShopeeAdapter] External API error:", error);
-      // Fallback to manual mode if API fails
-      console.log("[ShopeeAdapter] Falling back to manual mode");
-
-      const cleanUrl = await resolveAndCleanShopeeUrl(url);
-      const trackingUrl = config.affiliate_id
-        ? this.generateManualLink(cleanUrl, subId, config)
-        : url;
-
-      return {
-        shortLink: trackingUrl,
-        originalUrl: url,
-        cleanUrl,
-        trackingUrl,
-      };
-    }
   }
 
   /**
@@ -656,11 +579,10 @@ export async function generateShortLink(
     );
 
     // 6. Lấy thông tin sản phẩm, hoa hồng và title song song (use resolved URL)
+    // NOTE: fetchCommissionEstimate (External Shopee API) tạm thời tắt do API bị chặn
     const [productInfo, estCommission, productTitle] = await Promise.all([
       adapter.getProductInfo(resolvedUrl),
-      platform === "shopee"
-        ? fetchCommissionEstimate(adapterResult.cleanUrl || resolvedUrl)
-        : Promise.resolve(0),
+      Promise.resolve(0), // fetchCommissionEstimate disabled
       fetchProductTitle(resolvedUrl),
     ]);
 
