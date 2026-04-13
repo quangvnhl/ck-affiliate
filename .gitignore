@@ -45,3 +45,9 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# crawlee runtime storage
+/storage/
+
+# temp test files
+test-crawlee.js
