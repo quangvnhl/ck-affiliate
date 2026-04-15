@@ -27,38 +27,32 @@ export const dynamic = "force-dynamic";
 // Cho phép Vercel execution lâu hơn nếu là dạng Pro (mặc định cho Serverless là 10s-15s trên Hobby)
 export const maxDuration = 30;
 
-// Whitelist domains cho phép gọi API này
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) || [];
+// Whitelist domains được phép gọi API theo dạng cross-origin
+// Nếu không set biến này, api chỉ cho same-origin (ck-affiliate.vercel.app tự gọi)
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) ?? [];
 
-function isAllowedOrigin(req: NextRequest) {
-  // Same-origin request (từ browser trên cùng domain): không có header 'origin'.
-  // Vercel frontend gọi /api/scp sẽ không gửi 'origin' – chỉ có 'referer'.
+function isAllowedOrigin(req: NextRequest): boolean {
+  // Header 'Origin' CHỈ được browser gửi khi đây là cross-origin request.
+  // Same-origin request (frontend gọi API cùng domain) KHÔNG có 'Origin'.
+  // Do đó:
+  //   - Không có Origin  → same-origin hoặc direct navigation → CHO PHÉP
+  //   - Có Origin + nằm trong whitelist → cross-origin tin cậy → CHO PHÉP
+  //   - Có Origin + không trong whitelist → cross-origin lạ → CHẶN
   const origin = req.headers.get("origin");
-  const referer = req.headers.get("referer");
 
-  // Dev mode: cho phép mọi request (Postman, browser)
-  if (process.env.NODE_ENV === "development") return true;
+  if (!origin) return true; // same-origin / direct browser navigation
 
-  // Cross-origin: kiểm tra origin
-  if (origin) {
-    return ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
-  }
-
-  // Same-origin: kiểm tra referer
-  if (referer) {
-    return ALLOWED_ORIGINS.some(allowed => referer.startsWith(allowed));
-  }
-
-  // Không có cả origin lẫn referer (server-to-server thuần túý – chặn)
-  return false;
+  return ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
 }
 
+
 export async function GET(req: NextRequest) {
+
   try {
     // 1. Kiểm tra CORS chặn gọi ngoài luồng
     if (!isAllowedOrigin(req)) {
       return NextResponse.json(
-        { status: "error", message: "Forbidden Access", "allows": ALLOWED_ORIGINS },
+        { status: "error", message: "Forbidden Access", },
         { status: 403 }
       );
     }
