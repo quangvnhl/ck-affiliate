@@ -51,3 +51,4 @@ next-env.d.ts
 
 # temp test files
 test-crawlee.js
+.env*.local

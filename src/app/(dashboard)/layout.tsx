@@ -123,7 +123,8 @@ export default async function DashboardLayout({
         {/* Footer */}
         <footer className="border-t border-slate-200 bg-white px-4 py-4 lg:px-6">
           <p className="text-center text-xs text-slate-500">
-            © {new Date().getFullYear()} CK Affiliate. Kiếm tiền từ Shopee & TikTok Affiliate.
+            © {new Date().getFullYear()} CK Affiliate. Kiếm tiền từ Shopee &amp; TikTok Affiliate.{" "}
+            <span className="text-slate-400">v{process.env.npm_package_version ?? "0.2.0"}</span>
           </p>
         </footer>
       </div>

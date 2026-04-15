@@ -27,17 +27,30 @@ export const dynamic = "force-dynamic";
 // Cho phép Vercel execution lâu hơn nếu là dạng Pro (mặc định cho Serverless là 10s-15s trên Hobby)
 export const maxDuration = 30;
 
-// Hàm lấy whitelist từ biến môi trường
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || [];
+// Whitelist domains cho phép gọi API này
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) || [];
 
 function isAllowedOrigin(req: NextRequest) {
-  const origin = req.headers.get("origin") || req.headers.get("referer");
+  // Same-origin request (từ browser trên cùng domain): không có header 'origin'.
+  // Vercel frontend gọi /api/scp sẽ không gửi 'origin' – chỉ có 'referer'.
+  const origin = req.headers.get("origin");
+  const referer = req.headers.get("referer");
 
-  // Nới lỏng cho local test nếu bạn xài Postman mà không gài origin
-  // Nếu muốn bảo mật tuyệt đối, bỏ comment `if (!origin) return false;`
-  if (!origin) return process.env.NODE_ENV === "development";
+  // Dev mode: cho phép mọi request (Postman, browser)
+  if (process.env.NODE_ENV === "development") return true;
 
-  return ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+  // Cross-origin: kiểm tra origin
+  if (origin) {
+    return ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+  }
+
+  // Same-origin: kiểm tra referer
+  if (referer) {
+    return ALLOWED_ORIGINS.some(allowed => referer.startsWith(allowed));
+  }
+
+  // Không có cả origin lẫn referer (server-to-server thuần túý – chặn)
+  return false;
 }
 
 export async function GET(req: NextRequest) {
@@ -45,7 +58,7 @@ export async function GET(req: NextRequest) {
     // 1. Kiểm tra CORS chặn gọi ngoài luồng
     if (!isAllowedOrigin(req)) {
       return NextResponse.json(
-        { status: "error", message: "Forbidden Access" },
+        { status: "error", message: "Forbidden Access", "allows": ALLOWED_ORIGINS },
         { status: 403 }
       );
     }
@@ -87,7 +100,7 @@ export async function GET(req: NextRequest) {
             console.error(`Redirect resolver failed for ${request.url}`, request.errorMessages);
           }
         }, config);
-
+        // console.log("CRAW URL", url)
         await redirectCrawler.run([url]);
       } catch (err) {
         console.error("Resolve timeout/error:", err);

@@ -84,9 +84,8 @@ export function HeroLinkGenerator() {
     resetBackgroundStates();
 
     try {
-      const res = await fetch(`https://shpe-sc.cukinacha.com/scrape?url=${encodeURIComponent(url)}`);
+      const res = await fetch(`/api/scp?url=${encodeURIComponent(url)}`);
       const data: ScrapeResult = await res.json();
-      console.log(data);
       if (data.status === "success" && data.data) {
         if (data.data.title === "Not found") {
           setScrapeError("Link không hợp lệ hoặc Không tìm thấy thông tin sản phẩm.");
@@ -96,7 +95,7 @@ export function HeroLinkGenerator() {
           generateLinkInBackground(data.data.target_url, data.data, url);
         }
       } else {
-        setScrapeError("Lỗi hệ thống khi tải dữ liệu sản phẩm bên thứ 3.");
+        setScrapeError("Lỗi hệ thống khi tải dữ liệu sản phẩm.");
       }
     } catch (error) {
       console.error("Scrape API Error:", error);
@@ -106,31 +105,48 @@ export function HeroLinkGenerator() {
     }
   }, [resetBackgroundStates, generateLinkInBackground]);
 
-  // Handle paste - trim whitespace
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
-    const pastedText = e.clipboardData.getData("text").trim();
-    if (pastedText) {
-      setInputValue(pastedText);
-      setError(null);
-      if (pastedText.startsWith("http")) {
-        fetchScrapeData(pastedText);
-      } else {
-        resetBackgroundStates();
-      }
+  // Helper: check if URL is a known Shopee short link domain
+  const isShopeeUrl = useCallback((url: string): boolean => {
+    try {
+      const { hostname } = new URL(url);
+      return (
+        hostname.includes("shopee.vn") ||
+        hostname.includes("shopeefood.vn") ||
+        hostname.includes("s.shopee.vn") ||
+        hostname.includes("shope.ee") ||
+        hostname.includes("shp.ee") ||
+        hostname.includes("vn.shp.ee")
+      );
+    } catch {
+      return false;
     }
-  }, [fetchScrapeData, resetBackgroundStates]);
+  }, []);
 
-  // Handle input change
+  // Handle paste (Ctrl+V / mobile paste) - prevent browser default to avoid duplicate
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault(); // IMPORTANT: block browser native paste so onChange doesn't fire again
+    const pastedText = e.clipboardData.getData("text").trim();
+    if (!pastedText) return;
+    setInputValue(pastedText);
+    setError(null);
+    if (isShopeeUrl(pastedText)) {
+      fetchScrapeData(pastedText);
+    } else {
+      resetBackgroundStates();
+    }
+  }, [fetchScrapeData, resetBackgroundStates, isShopeeUrl]);
+
+  // Handle input change (manual typing only, NOT triggered on paste due to preventDefault above)
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;
     setInputValue(url);
     setError(null);
-    if (url.startsWith('http')) {
+    if (isShopeeUrl(url)) {
       fetchScrapeData(url);
     } else {
       resetBackgroundStates();
     }
-  }, [fetchScrapeData, resetBackgroundStates]);
+  }, [fetchScrapeData, resetBackgroundStates, isShopeeUrl]);
 
   // Handle submit
   const handleSubmit = useCallback(async (e?: React.FormEvent) => {
