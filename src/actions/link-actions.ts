@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 
 import { db } from "@/db";
 import { affiliateLinks, platforms } from "@/db/schema";
@@ -15,6 +15,13 @@ import type { Result } from "@/types";
 
 export interface CreateLinkResult extends GeneratedLinkResult {
   linkId: string;
+}
+
+export interface UserLinksResult {
+  links: unknown[];
+  totalCount: number;
+  totalPages: number;
+  currentPage: number;
 }
 
 /**
@@ -34,7 +41,7 @@ export async function createLinkAction(
       guestSessionId: formData.get("guestSessionId") as string | undefined,
     };
 
-    const linkMode = (formData.get("linkMode") as "quick" | "standard") || "quick";
+    const affiliateId = (formData.get("affiliateId") as string)?.trim();
 
     const validatedFields = createLinkSchema.safeParse(rawData);
 
@@ -84,7 +91,7 @@ export async function createLinkAction(
     const platformId = platformRecord[0].id;
 
     // 5. Gọi service để tạo short link
-    const result = await generateShortLink(originalUrl, userId, guestSessionId, linkMode);
+    const result = await generateShortLink(originalUrl, userId, guestSessionId, affiliateId);
 
     if (!result.success || !result.data) {
       return {
@@ -152,7 +159,10 @@ export async function createLinkAction(
 /**
  * Lấy danh sách link của user đã đăng nhập
  */
-export async function getUserLinksAction() {
+export async function getUserLinksAction(
+  page: number = 1,
+  pageSize: number = 20
+) {
   try {
     const session = await auth();
 
@@ -160,6 +170,15 @@ export async function getUserLinksAction() {
       return { success: false, error: "Vui lòng đăng nhập" };
     }
 
+    // Count total
+    const countResult = await db
+      .select({ count: count() })
+      .from(affiliateLinks)
+      .where(eq(affiliateLinks.userId, session.user.id));
+    const totalCount = countResult[0]?.count || 0;
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    const offset = (page - 1) * pageSize;
     const links = await db
       .select({
         id: affiliateLinks.id,
@@ -169,12 +188,23 @@ export async function getUserLinksAction() {
         clicks: affiliateLinks.clicks,
         createdAt: affiliateLinks.createdAt,
         platformId: affiliateLinks.platformId,
+        metaData: affiliateLinks.metaData,
       })
       .from(affiliateLinks)
       .where(eq(affiliateLinks.userId, session.user.id))
-      .orderBy(desc(affiliateLinks.createdAt));
+      .orderBy(desc(affiliateLinks.createdAt))
+      .limit(pageSize)
+      .offset(offset);
 
-    return { success: true, data: links };
+    return { 
+      success: true, 
+      data: {
+        links,
+        totalCount,
+        totalPages,
+        currentPage: page,
+      }
+    };
   } catch (error) {
     console.error("Get user links error:", error);
     return { success: false, error: "Không thể tải danh sách link" };

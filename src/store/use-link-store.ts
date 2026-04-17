@@ -28,6 +28,7 @@ interface LinkStore {
   generatedLink: CreateLinkResult | null;
   linkHistory: LinkHistoryItem[];
   guestSessionId: string | null;
+  affiliateId: string | null;
 
   // Actions
   setLoading: (loading: boolean) => void;
@@ -37,6 +38,7 @@ interface LinkStore {
   clearHistory: () => void;
   getOrCreateGuestSessionId: () => string;
   clearGuestSessionId: () => void;
+  setAffiliateId: (id: string) => void;
 }
 
 // ============================================
@@ -65,6 +67,7 @@ export const useLinkStore = create<LinkStore>()(
       generatedLink: null,
       linkHistory: [],
       guestSessionId: null,
+      affiliateId: null,
 
       // Actions
       setLoading: (loading) => set({ isLoading: loading }),
@@ -84,7 +87,7 @@ export const useLinkStore = create<LinkStore>()(
         };
         
         set((state) => ({
-          linkHistory: [historyItem, ...state.linkHistory].slice(0, 20), // Giữ tối đa 20 items
+          linkHistory: [historyItem, ...state.linkHistory].slice(0, 20),
         }));
       },
       
@@ -102,10 +105,11 @@ export const useLinkStore = create<LinkStore>()(
       },
       
       clearGuestSessionId: () => set({ guestSessionId: null }),
+      
+      setAffiliateId: (id) => set({ affiliateId: id }),
     }),
     {
       name: "ck-affiliate-link-store",
-      // Chỉ persist các fields cần thiết
       partialize: (state) => ({
         linkHistory: state.linkHistory,
         guestSessionId: state.guestSessionId,

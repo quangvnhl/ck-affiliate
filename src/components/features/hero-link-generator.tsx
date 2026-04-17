@@ -1,20 +1,23 @@
 "use client";
 
 import { useState, useTransition, useCallback, useEffect } from "react";
-import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Share2, Info } from "lucide-react";
+import { Link2, ArrowRight, Copy, Check, ExternalLink, X, ShoppingCart, Smartphone, Monitor, Clipboard, Share2, Info, Store } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useLinkStore } from "@/store/use-link-store";
 import { createLinkAction, type CreateLinkResult } from "@/actions/link-actions";
+import { getShopeeAffiliateIdAction } from "@/actions/platform-settings-actions";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/utils";
 import Image from "next/image";
+import Link from "next/link";
 
 export interface ScrapeResult {
   status: "success" | "error";
   data?: {
+    type?: "item" | "shop";
     title: string;
     image: string;
     shop_id: string;
@@ -41,29 +44,43 @@ export function HeroLinkGenerator() {
   const [scrapeData, setScrapeData] = useState<ScrapeResult["data"] | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [bgGeneratedLink, setBgGeneratedLink] = useState<CreateLinkResult | null>(null);
+  const [isGeneratingShortLink, setIsGeneratingShortLink] = useState(false);
 
   // Zustand store
   const {
     generatedLink,
     setGeneratedLink,
     addToHistory,
-    getOrCreateGuestSessionId
+    getOrCreateGuestSessionId,
+    affiliateId,
+    setAffiliateId
   } = useLinkStore();
+
+  // Load affiliate ID on mount
+  useEffect(() => {
+    if (!affiliateId) {
+      getShopeeAffiliateIdAction().then((result) => {
+        if (result.success && result.data) {
+          setAffiliateId(result.data);
+        }
+      });
+    }
+  }, [affiliateId, setAffiliateId]);
 
   const resetBackgroundStates = useCallback(() => {
     setScrapeData(null);
     setScrapeError(null);
     setBgGeneratedLink(null);
-    setGeneratedLink(null);
-  }, [setGeneratedLink]);
+  }, []);
 
   const generateLinkInBackground = useCallback(async (targetUrl: string, apiMetadata?: ScrapeResult["data"], rawInputUrl?: string) => {
+    setIsGeneratingShortLink(true);
     try {
       const guestSessionId = getOrCreateGuestSessionId();
       const formData = new FormData();
       formData.append("originalUrl", targetUrl);
       formData.append("guestSessionId", guestSessionId);
-      formData.append("linkMode", "standard");
+      formData.append("affiliateId", affiliateId || "");
 
       // Append metadata
       if (rawInputUrl) formData.append("rawUrl", rawInputUrl);
@@ -73,29 +90,51 @@ export function HeroLinkGenerator() {
       const result = await createLinkAction(formData);
       if (result.success && result.data) {
         setBgGeneratedLink(result.data);
+        setGeneratedLink(result.data);
       }
     } catch (err) {
       console.error("BG gen error:", err);
+    } finally {
+      setIsGeneratingShortLink(false);
     }
-  }, [getOrCreateGuestSessionId]);
+  }, [getOrCreateGuestSessionId, setGeneratedLink, affiliateId]);
 
   const fetchScrapeData = useCallback(async (url: string) => {
     setIsScraping(true);
     resetBackgroundStates();
 
     try {
-      const res = await fetch(`/api/scp?url=${encodeURIComponent(url)}`);
-      const data: ScrapeResult = await res.json();
-      if (data.status === "success" && data.data) {
-        if (data.data.title === "Not found") {
-          setScrapeError("Link không hợp lệ hoặc Không tìm thấy thông tin sản phẩm.");
-        } else {
-          setScrapeData(data.data);
-          // Kick off background generation using the target URL and metadata
-          generateLinkInBackground(data.data.target_url, data.data, url);
+      const externalAPIScape = "https://shpe-sc.cukinacha.com/scrape";
+      
+      // Try external API first
+      let res: Response;
+      try {
+        res = await fetch(`${externalAPIScape}?url=${encodeURIComponent(url)}`);
+        
+        // Check if external API is working (non-2xx status)
+        if (!res.ok) {
+          setScrapeError(`ERROR: ${res.status}`);
+          setIsScraping(false);
+          return;
         }
-      } else {
-        setScrapeError("Lỗi hệ thống khi tải dữ liệu sản phẩm.");
+
+        const data: ScrapeResult = await res.json();
+        
+        if (data.status === "success" && data.data) {
+          if (data.data.title === "Not found") {
+            setScrapeError("Link không hợp lệ hoặc Không tìm thấy thông tin sản phẩm.");
+          } else {
+            setScrapeData(data.data);
+            // Generate short link in background
+            generateLinkInBackground(data.data.target_url, data.data, url);
+          }
+        } else {
+          setScrapeError("Lỗi hệ thống khi tải dữ liệu sản phẩm.");
+        }
+      } catch (fetchError) {
+        // Network error or external API not accessible
+        console.error("Scrape API Error:", fetchError);
+        setScrapeError("ERROR: EXTERNAL_API_DOWN");
       }
     } catch (error) {
       console.error("Scrape API Error:", error);
@@ -169,11 +208,40 @@ export function HeroLinkGenerator() {
 
     setError(null);
 
+    // For shop type, show loading state then direct link
+    if (scrapeData?.type === "shop" && scrapeData.target_url && affiliateId) {
+      setIsGeneratingShortLink(true);
+      // Simulate short delay for better UX
+      setTimeout(() => {
+        const shopLink = {
+          linkId: "shop-link",
+          shortLink: `${scrapeData.target_url}?mmp_pid=an_${affiliateId}`,
+          originalUrl: scrapeData.target_url,
+          trackingUrl: `${scrapeData.target_url}?mmp_pid=an_${affiliateId}`,
+          platform: "shopee" as const,
+          productTitle: scrapeData.title,
+          code: "shop",
+          subId: `an_${affiliateId}`
+        };
+        setGeneratedLink(shopLink);
+        addToHistory(shopLink);
+        setIsGeneratingShortLink(false);
+        toast.success("Tạo link thành công!");
+      }, 500);
+      return;
+    }
+
     // If already generated in background, just show it
     if (bgGeneratedLink) {
       setGeneratedLink(bgGeneratedLink);
       addToHistory(bgGeneratedLink);
       toast.success("Tạo link thành công!");
+      return;
+    }
+
+    // If still generating, show loading
+    if (isGeneratingShortLink) {
+      toast.info("Đang tạo link rút gọn...");
       return;
     }
 
@@ -185,7 +253,7 @@ export function HeroLinkGenerator() {
         // If we have API data, use target_url, else use original input
         formData.append("originalUrl", scrapeData?.target_url || inputValue.trim());
         formData.append("guestSessionId", guestSessionId);
-        formData.append("linkMode", "standard");
+        formData.append("affiliateId", affiliateId || "");
 
         if (scrapeData) {
           formData.append("rawUrl", inputValue.trim());
@@ -286,42 +354,37 @@ export function HeroLinkGenerator() {
             onPaste={handlePaste}
             onKeyDown={handleKeyDown}
             placeholder="Dán link sản phẩm vào đây (VD: https://shopee.vn/...)"
-            className="w-full h-14 sm:pl-12 pl-6 sm:pr-48 pr-24 outline-none text-slate-900 md:text-lg bg-transparent"
+            className="w-full h-14 sm:pl-12 pl-6 pr-12 outline-none text-slate-900 md:text-lg bg-transparent"
             disabled={isPending}
           />
 
           {/* Clear Button */}
-          {inputValue && (
+          {inputValue && !isScraping && (
             <button
               type="button"
               onClick={() => {
                 setInputValue("");
                 setError(null);
+                setScrapeData(null);
+                setScrapeError(null);
+                setGeneratedLink(null);
               }}
-              className="absolute md:right-32 sm:right-24 right-16 p-1 text-slate-400 hover:text-slate-600 transition-colors"
+              className="absolute right-4 p-1 text-slate-400 hover:text-slate-600 transition-colors"
               disabled={isPending}
             >
               <X className="h-5 w-5" />
             </button>
           )}
 
-          {/* Button - Paste when empty, Submit when has value */}
-          {inputValue.trim() ? (
-            <Button
-              type="submit"
-              disabled={isPending}
-              className="absolute right-2 sm:px-7 px-4 rounded-full font-semibold text-white bg-amber-500 hover:bg-amber-700 transition-all active:scale-95"
-            >
-              {isPending ? (
-                <Spinner size="sm" className="mr-2" />
-              ) : (
-                <ArrowRight className="h-5 w-5 md:hidden" />
-              )}
-              <span className="hidden md:inline">
-                {isPending ? "Đang tạo..." : "Tạo Link"}
-              </span>
-            </Button>
-          ) : (
+          {/* Loading indicator when scraping */}
+          {isScraping && (
+            <div className="absolute right-4">
+              <Spinner size="sm" className="text-amber-500" />
+            </div>
+          )}
+
+          {/* Paste button when empty */}
+          {!inputValue && !isScraping && (
             <Button
               type="button"
               onClick={handlePasteFromClipboard}
@@ -339,8 +402,8 @@ export function HeroLinkGenerator() {
         )}
       </form>
 
-      {/* Preview Section */}
-      {(isScraping || scrapeData || scrapeError) && (
+      {/* Preview Section - always show when scraping or has data (except shop type) */}
+      {(isScraping || scrapeError || (scrapeData && scrapeData.type !== "shop")) && (
         <div className="mt-4 p-4 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200/50 animate-in fade-in slide-in-from-top-2 duration-300">
           {isScraping ? (
             <div className="flex gap-4 animate-pulse">
@@ -355,7 +418,7 @@ export function HeroLinkGenerator() {
               <Info className="h-4 w-4" />
               {scrapeError}
             </p>
-          ) : scrapeData ? (
+          ) : scrapeData && scrapeData.type !== "shop" ? (
             <div className="flex gap-4">
               <img
                 src={`https://cf.shopee.vn/file/${scrapeData.image}`}
@@ -402,58 +465,67 @@ export function HeroLinkGenerator() {
         </span>
       </div>
 
-      {/* Result Card */}
-      {generatedLink && (
+      {/* Result Card - show when generating or has link */}
+      {(isGeneratingShortLink || generatedLink) && (
         <div className="mt-8 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
           {/* Header */}
           <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-slate-100">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-slate-600">
-                Link đã tạo thành công
+                {isGeneratingShortLink ? "Đang tạo link rút gọn..." : "Link đã tạo thành công"}
               </span>
-              <span className={cn(
-                "px-2 py-0.5 rounded text-xs font-medium",
-                generatedLink.platform === "shopee"
-                  ? "bg-orange-100 text-orange-700"
-                  : "bg-slate-900 text-white"
-              )}>
-                {generatedLink.platform === "shopee" ? "Shopee" : "TikTok"}
-              </span>
+              {!isGeneratingShortLink && (
+                <span className={cn(
+                  "px-2 py-0.5 rounded text-xs font-medium",
+                  generatedLink?.platform === "shopee"
+                    ? "bg-orange-100 text-orange-700"
+                    : "bg-slate-900 text-white"
+                )}>
+                  {generatedLink?.platform === "shopee" ? "Shopee" : "TikTok"}
+                </span>
+              )}
             </div>
           </div>
 
           {/* Body */}
           <div className="p-4">
-            {/* Short Link */}
-            <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
-              <input
-                type="text"
-                value={generatedLink.shortLink}
-                readOnly
-                className="flex-1 bg-transparent text-sm font-mono text-slate-700 outline-none"
-              />
-              <Button
-                size="sm"
-                variant={copied ? "secondary" : "default"}
-                onClick={handleCopy}
-                className="shrink-0"
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-4 w-4 mr-1" />
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4 mr-1" />
-                    Copy
-                  </>
-                )}
-              </Button>
-            </div>
+            {/* Short Link - show skeleton while generating */}
+            {isGeneratingShortLink ? (
+              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg animate-pulse">
+                <div className="flex-1 h-4 bg-slate-200 rounded"></div>
+                <div className="w-16 h-8 bg-slate-200 rounded"></div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
+                <input
+                  type="text"
+                  value={generatedLink?.shortLink || ""}
+                  readOnly
+                  className="flex-1 bg-transparent text-sm font-mono text-slate-700 outline-none"
+                />
+                <Button
+                  size="sm"
+                  variant={copied ? "secondary" : "default"}
+                  onClick={handleCopy}
+                  className="shrink-0"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 mr-1" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-1" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
 
             {/* Product Title */}
-            {generatedLink.productTitle && (
+            {generatedLink?.productTitle && (
               <div className="mt-4 p-3 bg-slate-100 rounded-lg border border-slate-200">
                 <p className="text-sm font-medium text-slate-800 line-clamp-2">
                   📦 {generatedLink.productTitle}
@@ -461,92 +533,116 @@ export function HeroLinkGenerator() {
               </div>
             )}
 
-            {/* Open Link Button - use trackingUrl in quick mode */}
-            <a
-              href={generatedLink.trackingUrl || generatedLink.shortLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-lg rounded-lg transition-colors"
-            >
-              <ShoppingCart className="h-6 w-6" />
-              Mở để mua hàng
-            </a>
+            { scrapeData?.type === "shop"  && scrapeData.target_url && affiliateId ? (
+              <a
+                href={`${scrapeData.target_url}?mmp_pid=an_${affiliateId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-green-500 hover:bg-green-600 text-white font-semibold text-lg rounded-lg transition-colors"
+              >
+                <Store className="h-6 w-6" />
+                Mở cửa hàng
+              </a>
+
+            ) : null }
+
+            {/* Open Link Button - show skeleton while generating */}
+            {isGeneratingShortLink && scrapeData?.type === "item" ? (
+              <div className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-slate-200 rounded-lg animate-pulse">
+                <div className="h-6 w-6 bg-slate-300 rounded"></div>
+                <div className="h-6 w-32 bg-slate-300 rounded"></div>
+              </div>
+            ) : scrapeData?.type === "item"  && !isGeneratingShortLink && generatedLink ? (
+              <a
+                href={generatedLink.trackingUrl || generatedLink.shortLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 flex items-center justify-center gap-3 w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-lg rounded-lg transition-colors"
+              >
+                <ShoppingCart className="h-6 w-6" />
+                Mở để mua hàng
+              </a>
+            ) : null}
 
             {/* Share Button */}
-            <button
-              onClick={async () => {
-                const shareUrl = generatedLink.trackingUrl || generatedLink.shortLink;
-                const shareTitle = generatedLink.productTitle || "Xem sản phẩm này!";
-                if (navigator.share) {
-                  try {
-                    await navigator.share({ title: shareTitle, url: shareUrl });
-                  } catch (err) {
-                    // User cancelled share
+            {scrapeData?.type !== "shop" && generatedLink && (
+              <button
+                onClick={async () => {
+                  const shareUrl = generatedLink.trackingUrl || generatedLink.shortLink;
+                  const shareTitle = generatedLink.productTitle || "Xem sản phẩm này!";
+                  if (navigator.share) {
+                    try {
+                      await navigator.share({ title: shareTitle, url: shareUrl });
+                    } catch (err) {
+                      // User cancelled share
+                    }
+                  } else {
+                    await navigator.clipboard.writeText(shareUrl);
+                    toast.success("Đã copy link để chia sẻ!");
                   }
-                } else {
-                  await navigator.clipboard.writeText(shareUrl);
-                  toast.success("Đã copy link để chia sẻ!");
-                }
-              }}
-              className="mt-2 flex items-center justify-center gap-2 w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
-            >
-              <Share2 className="h-5 w-5" />
-              Chia sẻ
-            </button>
+                }}
+                className="mt-2 flex items-center justify-center gap-2 w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
+              >
+                <Share2 className="h-5 w-5" />
+                Chia sẻ
+              </button>
+            )}
 
 
 
-            {/* Instruction Section */}
-            <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
-              {/* Guide Text */}
-              <p className="text-sm text-slate-700 leading-relaxed mb-4">
-                💸 Chúng tôi không bán hàng, chúng tôi trả lại % hoa hồng cho bạn.
-                <br />
-                👌 Hãy đảm bảo rằng <strong className="text-amber-700">Giỏ Hàng</strong> của bạn đang không có sản phẩm này trong giỏ hàng.
-                <br />
-                👌 Nếu có sản phẩm này trong <strong className="text-amber-700">Giỏ Hàng</strong>, hãy xóa nó đi và quay lại đây bấm vào <strong className="text-amber-700">Mở để mua hàng</strong>, sau đó bạn có thể <strong className="text-amber-700">Mua luôn</strong> hoặc <strong className="text-amber-700">Thêm vào giỏ</strong> trên sàn TMĐT.
-              </p>
+            {/* Instruction Section - only for item type */}
+            {scrapeData?.type !== "shop" && (
+              <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                {/* Guide Text */}
+                <p className="text-sm text-slate-700 leading-relaxed mb-4">
+                  💸 Chúng tôi không bán hàng, chúng tôi trả lại % hoa hồng cho bạn.
+                  <br />
+                  👌 Hãy đảm bảo rằng <strong className="text-amber-700">Giỏ Hàng</strong> của bạn đang không có sản phẩm này trong giỏ hàng.
+                  <br />
+                  👌 Nếu có sản phẩm này trong <strong className="text-amber-700">Giỏ Hàng</strong>, hãy xóa nó đi và quay lại đây bấm vào <strong className="text-amber-700">Mở để mua hàng</strong>, sau đó bạn có thể <strong className="text-amber-700">Mua luôn</strong> hoặc <strong className="text-amber-700">Thêm vào giỏ</strong> trên sàn TMĐT.
+                </p>
 
-              {/* Mobile Guide */}
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Smartphone className="h-5 w-5 text-slate-600" />
-                  <span className="text-sm font-medium text-slate-700">Trên điện thoại</span>
+                {/* Mobile Guide */}
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Smartphone className="h-5 w-5 text-slate-600" />
+                    <span className="text-sm font-medium text-slate-700">Trên điện thoại</span>
+                  </div>
+                  <div className="rounded-lg overflow-hidden border border-slate-200">
+                    <Image
+                      src="/images/add-cart-mobile.png"
+                      alt="Hướng dẫn thêm vào giỏ trên mobile"
+                      width={600}
+                      height={400}
+                      className="w-full h-auto"
+                    />
+                  </div>
                 </div>
-                <div className="rounded-lg overflow-hidden border border-slate-200">
-                  <Image
-                    src="/images/add-cart-mobile.png"
-                    alt="Hướng dẫn thêm vào giỏ trên mobile"
-                    width={600}
-                    height={400}
-                    className="w-full h-auto"
-                  />
+
+                {/* PC Guide */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Monitor className="h-5 w-5 text-slate-600" />
+                    <span className="text-sm font-medium text-slate-700">Trên máy tính</span>
+                  </div>
+                  <div className="rounded-lg overflow-hidden border border-slate-200">
+                    <Image
+                      src="/images/add-cart-pc.png"
+                      alt="Hướng dẫn thêm vào giỏ trên PC"
+                      width={600}
+                      height={400}
+                      className="w-full h-auto"
+                    />
+                  </div>
                 </div>
               </div>
-
-              {/* PC Guide */}
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Monitor className="h-5 w-5 text-slate-600" />
-                  <span className="text-sm font-medium text-slate-700">Trên máy tính</span>
-                </div>
-                <div className="rounded-lg overflow-hidden border border-slate-200">
-                  <Image
-                    src="/images/add-cart-pc.png"
-                    alt="Hướng dẫn thêm vào giỏ trên PC"
-                    width={600}
-                    height={400}
-                    className="w-full h-auto"
-                  />
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Footer */}
           <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
             <a
-              href={generatedLink.shortLink}
+              href={generatedLink?.shortLink || ""}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center text-sm text-amber-600 hover:text-amber-700"
@@ -574,9 +670,9 @@ export function HeroLinkGenerator() {
       {/* Guest Notice */}
       <p className="mt-6 text-center text-sm text-white">
         Tạo link miễn phí, không cần đăng nhập.{" "}
-        <a href="/register" className="text-amber-200 hover:underline">
+        <Link href="/register" className="text-amber-200 hover:underline">
           Đăng ký
-        </a>{" "}
+        </Link>{" "}
         để theo dõi hoa hồng và rút tiền.
       </p>
     </div>

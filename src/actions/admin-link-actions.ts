@@ -22,6 +22,13 @@ export interface AdminLinkItem {
   userId: string | null;
   guestSessionId: string | null;
   userEmail: string | null;
+  metaData: {
+    scrapeImage?: string;
+    scrapeTitle?: string;
+    originalInputUrl?: string;
+    title?: string;
+    resolvedUrl?: string;
+  } | null;
 }
 
 export interface AdminLinksResult {
@@ -75,6 +82,7 @@ export async function getAdminLinksAction(
         userId: affiliateLinks.userId,
         guestSessionId: affiliateLinks.guestSessionId,
         userEmail: users.email,
+        metaData: affiliateLinks.metaData,
       })
       .from(affiliateLinks)
       .leftJoin(users, eq(affiliateLinks.userId, users.id))

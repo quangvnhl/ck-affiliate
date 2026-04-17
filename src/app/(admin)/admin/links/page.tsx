@@ -56,7 +56,7 @@ export default function AdminLinksPage() {
   };
 
   const getPlatformColor = (platformId: number | null) => {
-    if (platformId === 1) return "bg-orange-100 text-orange-700";
+    if (platformId === 1) return "bg-orange-700/50 border border-orange-700 text-orange-300";
     if (platformId === 2) return "bg-slate-100 text-slate-700";
     return "bg-slate-100 text-slate-600";
   };
@@ -139,16 +139,33 @@ export default function AdminLinksPage() {
 
                     {/* Links */}
                     <td className="px-4 py-3">
-                      <div className="space-y-1 max-w-[300px]">
-                        <p className="text-sm text-amber-400 font-medium truncate" title={link.shortLink}>
-                          {link.shortLink}
-                        </p>
-                        <p className="text-xs text-slate-400 truncate" title={link.originalUrl}>
-                          {link.originalUrl}
-                        </p>
-                        <p className="text-xs text-blue-400 truncate" title={link.trackingUrl}>
-                          {link.trackingUrl}
-                        </p>
+                      <div className="flex items-start gap-3 max-w-[350px]">
+                        {link.metaData?.scrapeImage && (
+                          <img 
+                            src={`https://cf.shopee.vn/file/${link.metaData.scrapeImage}`} 
+                            alt="" 
+                            className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                          />
+                        )}
+                        <div className="space-y-1 min-w-0">
+                          {(link.metaData?.scrapeTitle || link.metaData?.title) && (
+                            <p className="text-sm text-white font-medium truncate" title={String(link.metaData.scrapeTitle || link.metaData.title)}>
+                              {link.metaData.scrapeTitle || link.metaData.title}
+                            </p>
+                          )}
+                          <p className="text-sm text-amber-400 font-medium truncate" title={link.shortLink}>
+                            <a href={link.shortLink} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                              {link.shortLink}
+                              <ExternalLink className="inline-block h-3 w-3 ml-1" />
+                            </a>
+                          </p>
+                          <p className="text-xs text-slate-400 truncate" title={link.originalUrl}>
+                            <a href={link.originalUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                              {link.originalUrl}
+                              <ExternalLink className="inline-block h-3 w-3 ml-1" />
+                            </a>
+                          </p>
+                        </div>
                       </div>
                     </td>
 

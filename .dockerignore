@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+*.log
+.env
+.env.local
+.env.*.local
+drizzle
+.vercel
+components.json
+tailwind.config.*
+postcss.config.*
+eslint.config.mjs
+tsconfig.json
+next-env.d.ts
+test-crawlee.js
+*.md

@@ -15,6 +15,13 @@
       "when": 1775558935720,
       "tag": "0001_purple_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776234583243,
+      "tag": "0002_complete_mentor",
+      "breakpoints": true
     }
   ]
 }

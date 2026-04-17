@@ -1,55 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BasicCrawler, Configuration } from '@crawlee/basic';
 
-// ---- Types ----
-interface CommissionContent {
-  text: string;
-  style?: { color: string };
-}
-interface SharingSectionItem {
-  icon_hash?: string;
-  content: CommissionContent[];
-  section_url?: string;
-  sub_sections: null;
-}
-interface SharingApiResponse {
-  error: number;
-  data: {
-    affiliate_status: number;
-    sharing_banner?: {
-      sections: SharingSectionItem[];
-    };
-  } | null;
-}
-
 export const dynamic = "force-dynamic";
 
-// Cho phép Vercel execution lâu hơn nếu là dạng Pro (mặc định cho Serverless là 10s-15s trên Hobby)
 export const maxDuration = 30;
 
-// Whitelist domains được phép gọi API theo dạng cross-origin
-// Nếu không set biến này, api chỉ cho same-origin (ck-affiliate.vercel.app tự gọi)
-// const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) ?? [];
 const ALLOWED_ORIGINS = ["localhost:3000", "ck-affiliate.vercel.app"]
 const ORIGIN_CHECK = false;
 
 function isAllowedOrigin(req: NextRequest): boolean {
-
   const host = req.headers.get("host");
-
-  console.log("get referer host", req.headers.get("host"))
-  // console.log("!referer", !referer)
   if (!host) return false;
-
-  console.log("ALLOWED_ORIGINS", ALLOWED_ORIGINS.some(allowed => host.startsWith(allowed)));
   return ALLOWED_ORIGINS.some(allowed => host.startsWith(allowed));
 }
-
 
 export async function GET(req: NextRequest) {
 
   try {
-    // 1. Kiểm tra CORS chặn gọi ngoài luồng
     if (ORIGIN_CHECK && !isAllowedOrigin(req)) {
       return NextResponse.json(
         { status: "error", message: "Forbidden Access", },
@@ -67,7 +34,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 2. Resolve Redirect nếu là Short URLs của Shopee
+    // 1. Resolve Redirect nếu là Short URLs của Shopee
     let finalUrl = url;
     if (url.includes("s.shopee.vn") || url.includes("shope.ee") || url.includes("shp.ee") || url.includes("vn.shp.ee")) {
       try {
@@ -95,22 +62,18 @@ export async function GET(req: NextRequest) {
             console.error(`Redirect resolver failed for ${request.url}`, request.errorMessages);
           }
         }, config);
-        // console.log("CRAW URL", url)
         await redirectCrawler.run([url]);
       } catch (err) {
         console.error("Resolve timeout/error:", err);
       }
     }
 
-    // 3. Bóc tách shopId và itemId
+    // 2. Bóc tách shopId và itemId
     let shopId = "";
     let itemId = "";
 
-    // P1: /product/50593208/6436934998
     const pattern1 = /\/product\/(\d+)\/(\d+)/;
-    // P2: -i.50593208.16458254209
     const pattern2 = /-i\.(\d+)\.(\d+)/;
-    // P3: /opaanlp/8466374/6436934998
     const pattern3 = /\/opaanlp\/(\d+)\/(\d+)/;
 
     const match1 = finalUrl.match(pattern1);
@@ -125,22 +88,16 @@ export async function GET(req: NextRequest) {
       shopId = match3[1]; itemId = match3[2];
     }
 
-    // Nếu không khớp regex nào (link không phải sản phẩm)
     if (!shopId || !itemId) {
       return NextResponse.json({
-        status: "success",
-        data: {
-          title: "Not found",
-          image: "Not found",
-          target_url: finalUrl
-        }
+        status: "error",
+        message: "Invalid product URL format"
       });
     }
 
-    // Proxy format thống nhất (Dạng 2 hoặc product/:shopId/:itemId)
     const targetUrl = `https://shopee.vn/product/${shopId}/${itemId}`;
 
-    // 4. Scrape HTML từ Proxy URL
+    // 3. Scrape HTML và trả về full source
     let htmlSource = "";
     const config = new Configuration({
       persistStorage: false,
@@ -172,77 +129,28 @@ export async function GET(req: NextRequest) {
     await crawler.run([targetUrl]);
 
     if (!htmlSource) {
-      throw new Error(`Scrape HTTP error! source is empty.`);
-    }
-
-    // console.log(htmlSource);
-
-    // 5. Tìm Title, Image và Price qua Regex độc lập
-    const titleRegex = /"title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
-    const imageRegex = /"image"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
-    const priceRegexStr = /"price"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
-    const lowPriceRegex = /"lowPrice"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
-    const integerPriceRegex = /"price"\s*:\s*(\d{7,15})/; // Shopee price multiplied by 100,000
-
-    const titleMatch = htmlSource.match(titleRegex);
-    const imageMatch = htmlSource.match(imageRegex);
-
-    // Price Matching
-    let priceMatch = htmlSource.match(lowPriceRegex) || htmlSource.match(priceRegexStr);
-    let extractedPrice = 0;
-
-    if (priceMatch && priceMatch[1]) {
-      extractedPrice = Math.round(parseFloat(priceMatch[1]));
-    } else {
-      const rawPriceMatch = htmlSource.match(integerPriceRegex);
-      if (rawPriceMatch && rawPriceMatch[1]) {
-        extractedPrice = Math.round(parseInt(rawPriceMatch[1], 10) / 100000);
-      }
-    }
-
-
-    let title = "Not found";
-    let image = "Not found";
-
-    if (titleMatch && titleMatch[1]) {
-      // Giải mã Unicode và Escape tags
-      title = titleMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-    }
-    if (imageMatch && imageMatch[1]) {
-      image = imageMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-    }
-
-    // Trả về Not found nếu không có cả title/image
-    if (title === "Not found" && image === "Not found") {
       return NextResponse.json({
-        status: "success",
-        data: { title: "Not found", image: "Not found", shop_id: shopId, product_id: itemId, target_url: targetUrl }
+        status: "error",
+        message: "Failed to fetch HTML source"
       });
     }
 
-    // 6. Return Data Payload
+    // 4. Return full source
     return NextResponse.json({
       status: "success",
       data: {
-        title,
-        image,
-        price: extractedPrice || undefined,
+        source: htmlSource,
+        url: targetUrl,
         shop_id: shopId,
-        product_id: itemId,
-        target_url: targetUrl
+        product_id: itemId
       }
     });
 
   } catch (error) {
-    console.error("Scrape Module Error:", error);
-    // Vẫn trả success status 200 nhưng data là Not found (Tránh hỏng mảng logic phía Fetcher)
+    console.error("Scrape Full Source Error:", error);
     return NextResponse.json({
-      status: "success",
-      data: {
-        title: "Not found",
-        image: "Not found",
-        target_url: ""
-      }
+      status: "error",
+      message: String(error)
     });
   }
 }

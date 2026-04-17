@@ -487,107 +487,54 @@ export const AffiliateAdapterFactory = new AffiliateAdapterFactoryClass();
 
 /**
  * Tạo link affiliate rút gọn
- * Sử dụng Adapter Pattern qua Factory
- * @param linkMode - "quick" (manual link, no resolve/commission/title) or "standard" (full flow)
+ * @param originalUrl - URL gốc sản phẩm
+ * @param userId - ID của user (nếu đã đăng nhập)
+ * @param guestSessionId - ID của guest session
+ * @param affiliateId - Shopee affiliate ID (từ localStorage/cookie)
  */
 export async function generateShortLink(
   originalUrl: string,
   userId?: string,
   guestSessionId?: string,
-  linkMode: "quick" | "standard" = "quick"
+  affiliateId?: string
 ): Promise<Result<GeneratedLinkResult>> {
   try {
     // 1. Detect platform từ URL
     const platform = detectPlatform(originalUrl);
-    console.log('originalUrl', originalUrl, 'mode', linkMode)
     if (!platform) {
       return {
         success: false,
-        error: "Link không hợp lệ. Chỉ hỗ trợ Shopee và TikTok 2.",
+        error: "Link không hợp lệ. Chỉ hỗ trợ Shopee và TikTok.",
       };
     }
 
-    // 2. Query platform config từ database
-    const platformRecord = await db.query.platforms.findFirst({
-      where: eq(platforms.name, platform),
-    });
-
-    // Lấy api_config (có thể null)
-    const platformConfig = platformRecord?.apiConfig as Record<string, unknown> | null;
-
-    // 3. Lấy adapter từ Factory
-    const adapter = AffiliateAdapterFactory.getAdapter(platform);
-
-    // 4. Generate tracking ID
-    const trackingId = userId || guestSessionId || "anon";
-    const subId = generateSubId(userId, guestSessionId);
-
-    // 5. Generate unique code for internal shortener
+    // 2. Generate unique code for internal shortener
     const code = await generateUniqueCode(5);
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
     const internalShortLink = `${baseUrl}/${code}`;
 
-    // ===== QUICK MODE =====
-    if (linkMode === "quick" && platform === "shopee") {
-      const shopeeConfig = platformConfig as unknown as ShopeePlatformConfig | undefined;
-      if (shopeeConfig?.affiliate_id) {
-        // Resolve redirect chain to get final product URL
-        const resolvedUrl = await resolveRedirects(originalUrl);
-        const urlForTracking = resolvedUrl !== originalUrl ? resolvedUrl : originalUrl;
+    // 3. Resolve redirect chain to get final product URL
+    const resolvedUrl = await resolveRedirects(originalUrl);
+    const urlForTracking = resolvedUrl !== originalUrl ? resolvedUrl : originalUrl;
 
-        const trackingTag = `${shopeeConfig.default_sub_id || "CK"}_${trackingId}_${code}`;
-        const encodedUrl = encodeURIComponent(urlForTracking);
-        const trackingUrl = `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${shopeeConfig.affiliate_id}&sub_id=${trackingTag}`;
+    // 4. Create tracking URL với affiliate_id từ params
+    const trackingTag = `${code}----`;
+    const encodedUrl = encodeURIComponent(urlForTracking);
+    
+    let trackingUrl: string;
 
-        // Fetch title from resolved URL (non-blocking)
-        const productTitle = await fetchProductTitle(resolvedUrl);
-
-        const metaData: Record<string, unknown> = {
-          title: productTitle || undefined,
-          resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
-        };
-
-        return {
-          success: true,
-          data: {
-            shortLink: internalShortLink,
-            trackingUrl,
-            code,
-            originalUrl,
-            resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
-            platform,
-            subId: trackingId,
-            productTitle,
-            metaData,
-          },
-        };
-      }
+    if (platform === "shopee" && affiliateId) {
+      // Shopee: sử dụng Universal Link với affiliate_id từ params
+      trackingUrl = `https://s.shopee.vn/an_redir?origin_link=${encodedUrl}&affiliate_id=${affiliateId}&sub_id=${trackingTag}`;
+    } else {
+      // TikTok hoặc không có affiliate_id: sử dụng adapter
+      const adapter = AffiliateAdapterFactory.getAdapter(platform);
+      const adapterResult = await adapter.generateLink(urlForTracking, trackingTag);
+      trackingUrl = adapterResult.trackingUrl;
     }
 
-    // ===== STANDARD MODE =====
-    // Resolve redirect chain first
-    const resolvedUrl = await resolveRedirects(originalUrl);
-
-    // 5. Gọi adapter để tạo link platform với Tracking URL chứa mã code
-    const baseTrackingId = platformConfig?.mode === "manual" ? trackingId : subId;
-    const trackingTag = `${baseTrackingId}_${code}`;
-
-    const adapterResult = await adapter.generateLink(
-      resolvedUrl,
-      trackingTag,
-      platformConfig || undefined
-    );
-
-    // 6. Lấy thông tin sản phẩm, hoa hồng và title song song (use resolved URL)
-    // NOTE: fetchCommissionEstimate (External Shopee API) tạm thời tắt do API bị chặn
-    const [productInfo, estCommission, productTitle] = await Promise.all([
-      adapter.getProductInfo(resolvedUrl),
-      Promise.resolve(0), // fetchCommissionEstimate disabled
-      fetchProductTitle(resolvedUrl),
-    ]);
-
-    // 7. Determine shortLink - Force to use internal short link (dạng code)
-    const finalShortLink = internalShortLink;
+    // 5. Fetch title from resolved URL
+    const productTitle = await fetchProductTitle(resolvedUrl);
 
     const metaData: Record<string, unknown> = {
       title: productTitle || undefined,
@@ -597,15 +544,13 @@ export async function generateShortLink(
     return {
       success: true,
       data: {
-        shortLink: finalShortLink,
-        trackingUrl: adapterResult.trackingUrl,
+        shortLink: internalShortLink,
+        trackingUrl,
         code,
         originalUrl,
         resolvedUrl: resolvedUrl !== originalUrl ? resolvedUrl : undefined,
         platform,
-        subId: platformConfig?.mode === "manual" ? trackingId : subId,
-        productInfo,
-        estCommission,
+        subId: code,
         productTitle,
         metaData,
       },

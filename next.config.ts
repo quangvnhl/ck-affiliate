@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   serverExternalPackages: ['crawlee', '@crawlee/basic', 'got-scraping'],
   images: {
     remotePatterns: [
