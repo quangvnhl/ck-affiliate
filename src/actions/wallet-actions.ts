@@ -18,12 +18,20 @@ export interface WalletStats {
     totalWithdrawn: number;        // Tổng đã rút
 }
 
-export interface TransactionItem {
+export interface PointTransactionItem {
     id: string;
-    type: "cashback" | "withdrawal";
+    points: number;
+    type: string;
+    status: string;
+    trash: boolean;
+    description: string;
+    createdAt: Date;
+}
+
+export interface WithdrawalHistoryItem {
+    id: string;
     amount: number;
     status: string;
-    description: string;
     createdAt: Date;
 }
 
@@ -72,12 +80,25 @@ export async function getWalletStats(): Promise<Result<WalletStats>> {
                 )
             );
 
+        // Tính tổng tiền đã thanh toán
+        const paidSum = await db
+            .select({
+                total: sum(withdrawalRequests.amount),
+            })
+            .from(withdrawalRequests)
+            .where(
+                and(
+                    eq(withdrawalRequests.userId, session.user.id),
+                    eq(withdrawalRequests.status, "paid")
+                )
+            );
+
         return {
             success: true,
             data: {
                 walletBalance: Number(user[0].walletBalance) || 0,
                 pendingWithdrawal: Number(pendingSum[0]?.total) || 0,
-                totalWithdrawn: Number(user[0].totalWithdrawn) || 0,
+                totalWithdrawn: Number(paidSum[0]?.total) || 0,
             },
         };
     } catch (error) {
@@ -90,7 +111,7 @@ export async function getWalletStats(): Promise<Result<WalletStats>> {
 // GET TRANSACTION HISTORY
 // ============================================
 
-export async function getTransactionHistory(): Promise<Result<TransactionItem[]>> {
+export async function getTransactionHistory(): Promise<Result<PointTransactionItem[]>> {
     try {
         const session = await auth();
 
@@ -98,12 +119,13 @@ export async function getTransactionHistory(): Promise<Result<TransactionItem[]>
             return { success: false, error: "Bạn chưa đăng nhập" };
         }
 
-        // 1. Lấy danh sách cashback (từ bảng transactions)
         const cashbacks = await db
             .select({
                 id: transactions.id,
-                amount: transactions.cashbackAmount,
+                points: transactions.points,
+                type: transactions.type,
                 status: transactions.status,
+                trash: transactions.trash,
                 createdAt: transactions.createdAt,
                 orderIdExternal: transactions.orderIdExternal,
             })
@@ -112,7 +134,34 @@ export async function getTransactionHistory(): Promise<Result<TransactionItem[]>
             .orderBy(sql`${transactions.createdAt} DESC`)
             .limit(50);
 
-        // 2. Lấy danh sách yêu cầu rút tiền
+        const items: PointTransactionItem[] = cashbacks.map(tx => ({
+            id: tx.id,
+            points: tx.points || 0,
+            type: tx.type,
+            status: tx.status,
+            trash: tx.trash,
+            description: tx.type === "commission" ? `Cashback đơn hàng ${tx.orderIdExternal || "N/A"}` : "Rút điểm",
+            createdAt: tx.createdAt,
+        }));
+
+        return {
+            success: true,
+            data: items,
+        };
+    } catch (error) {
+        console.error("Get transaction history error:", error);
+        return { success: false, error: "Đã xảy ra lỗi" };
+    }
+}
+
+export async function getWithdrawalHistory(): Promise<Result<WithdrawalHistoryItem[]>> {
+    try {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+            return { success: false, error: "Bạn chưa đăng nhập" };
+        }
+
         const withdrawals = await db
             .select({
                 id: withdrawalRequests.id,
@@ -125,40 +174,19 @@ export async function getTransactionHistory(): Promise<Result<TransactionItem[]>
             .orderBy(sql`${withdrawalRequests.createdAt} DESC`)
             .limit(50);
 
-        // 3. Gộp và format lại
-        const items: TransactionItem[] = [];
-
-        for (const tx of cashbacks) {
-            items.push({
-                id: tx.id,
-                type: "cashback",
-                amount: Number(tx.amount) || 0,
-                status: tx.status,
-                description: `Cashback từ đơn hàng ${tx.orderIdExternal || "N/A"}`,
-                createdAt: tx.createdAt,
-            });
-        }
-
-        for (const wd of withdrawals) {
-            items.push({
-                id: wd.id,
-                type: "withdrawal",
-                amount: Number(wd.amount) || 0,
-                status: wd.status,
-                description: "Yêu cầu rút tiền",
-                createdAt: wd.createdAt,
-            });
-        }
-
-        // Sắp xếp theo thời gian mới nhất
-        items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const items: WithdrawalHistoryItem[] = withdrawals.map(wd => ({
+            id: wd.id,
+            amount: Number(wd.amount) || 0,
+            status: wd.status,
+            createdAt: wd.createdAt,
+        }));
 
         return {
             success: true,
-            data: items.slice(0, 50), // Giới hạn 50 items
+            data: items,
         };
     } catch (error) {
-        console.error("Get transaction history error:", error);
+        console.error("Get withdrawal history error:", error);
         return { success: false, error: "Đã xảy ra lỗi" };
     }
 }

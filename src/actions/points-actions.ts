@@ -35,62 +35,58 @@ export async function getUserPointsAction() {
     ? parseInt(minWithdrawalSetting[0].value as string)
     : 10;
 
-  // Get all confirmed transactions for this user
-  const confirmedTransactions = await db
-    .select({
-      id: transactions.id,
-      orderIdExternal: transactions.orderIdExternal,
-      cashbackAmount: transactions.cashbackAmount,
-      points: transactions.points,
-      type: transactions.type,
-      status: transactions.status,
-      createdAt: transactions.createdAt,
-    })
+  // Get total earned points (commission, confirmed, not trashed)
+  const earnedQuery = await db
+    .select({ total: sql<number>`sum(${transactions.points})` })
     .from(transactions)
     .where(and(
       eq(transactions.userId, userId),
-      eq(transactions.status, "confirmed")
+      eq(transactions.type, "commission"),
+      eq(transactions.status, "confirmed"),
+      eq(transactions.trash, false)
     ));
 
-  // Calculate total points from confirmed transactions
-  // Commission = positive, Withdrawal = negative
-  const totalPoints = confirmedTransactions
-    .reduce((sum, tx) => sum + (tx.points || 0), 0);
+  const earnedPoints = Number(earnedQuery[0]?.total) || 0;
 
-  // Get pending transactions
-  const pendingTransactions = await db
-    .select({
-      points: transactions.points,
-    })
+  // Get total withdrawn points (withdrawal, not rejected, not trashed)
+  // Note: withdrawal points are stored as negative values
+  const withdrawnQuery = await db
+    .select({ total: sql<number>`sum(${transactions.points})` })
     .from(transactions)
     .where(and(
       eq(transactions.userId, userId),
-      eq(transactions.status, "pending")
+      eq(transactions.type, "withdrawal"),
+      sql`${transactions.status} != 'rejected'`,
+      eq(transactions.trash, false)
     ));
 
-  const pendingPoints = pendingTransactions
-    .filter((tx) => tx.points && tx.points > 0)
-    .reduce((sum, tx) => sum + (tx.points || 0), 0);
+  const withdrawnPoints = Number(withdrawnQuery[0]?.total) || 0;
 
-  // Get user's bank info
-  const userBank = await db
-    .select({
-      bank: affiliateLinks.metaData,
-    })
-    .from(affiliateLinks)
-    .where(eq(affiliateLinks.userId, userId))
-    .limit(1);
+  // Calculate available points (Điểm của tôi)
+  const totalPoints = earnedPoints + withdrawnPoints; // withdrawnPoints is negative
+
+  // Get withdrawing points (Điểm đang rút)
+  const withdrawingQuery = await db
+    .select({ total: sql<number>`sum(${transactions.points})` })
+    .from(transactions)
+    .where(and(
+      eq(transactions.userId, userId),
+      eq(transactions.type, "withdrawal"),
+      sql`${transactions.status} IN ('pending', 'approved', 'processing')`,
+      eq(transactions.trash, false)
+    ));
+
+  const withdrawingPoints = Math.abs(Number(withdrawingQuery[0]?.total) || 0);
 
   return {
     success: true,
     data: {
       totalPoints,
-      pendingPoints,
-      availablePoints: totalPoints, // Can withdraw = confirmed only
+      withdrawingPoints,
+      availablePoints: totalPoints,
       exchangeRate,
       minimumWithdrawal,
       exchangeMessage: `${totalPoints} điểm = ${(totalPoints * exchangeRate).toLocaleString("vi-VN")}đ`,
-      pendingMessage: pendingPoints > 0 ? `${pendingPoints} điểm đang chờ xác nhận` : null,
     },
   };
 }
@@ -130,15 +126,30 @@ export async function createWithdrawalByPointsAction(points: number) {
   }
 
   // Check if user has enough points
-  const confirmedTransactions = await db
-    .select({ points: transactions.points })
+  const earnedQuery = await db
+    .select({ total: sql<number>`sum(${transactions.points})` })
     .from(transactions)
     .where(and(
       eq(transactions.userId, userId),
-      eq(transactions.status, "confirmed")
+      eq(transactions.type, "commission"),
+      eq(transactions.status, "confirmed"),
+      eq(transactions.trash, false)
     ));
 
-  const totalPoints = confirmedTransactions.reduce((sum, tx) => sum + (tx.points || 0), 0);
+  const earnedPoints = Number(earnedQuery[0]?.total) || 0;
+
+  const withdrawnQuery = await db
+    .select({ total: sql<number>`sum(${transactions.points})` })
+    .from(transactions)
+    .where(and(
+      eq(transactions.userId, userId),
+      eq(transactions.type, "withdrawal"),
+      sql`${transactions.status} != 'rejected'`,
+      eq(transactions.trash, false)
+    ));
+
+  const withdrawnPoints = Number(withdrawnQuery[0]?.total) || 0;
+  const totalPoints = earnedPoints + withdrawnPoints;
 
   if (points > totalPoints) {
     return { success: false, error: `Không đủ điểm. Bạn có ${totalPoints} điểm` };

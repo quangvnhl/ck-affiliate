@@ -212,6 +212,10 @@ export default function AdminReconciliationPage() {
     setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, commissionPercent: parsedValue } : row));
   };
 
+  const updateRowSubId = (index: number, value: string) => {
+    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, subId: value } : row));
+  };
+
   const handleBatchSubmit = async () => {
     if (csvData.length === 0) {
       toast.error("Vui lòng tải lên file CSV có dữ liệu");
@@ -405,7 +409,14 @@ export default function AdminReconciliationPage() {
                       
                       return (
                         <tr key={index} className="border-b border-slate-700/50 hover:bg-slate-800/30">
-                          <td className="px-4 py-3 font-mono text-xs">{row.subId}</td>
+                          <td className="px-4 py-3">
+                            <Input 
+                              value={row.subId}
+                              onChange={(e) => updateRowSubId(index, e.target.value)}
+                              placeholder="SubID"
+                              className="h-8 w-32 bg-slate-800 border-slate-700 text-slate-50 font-mono text-xs"
+                            />
+                          </td>
                           <td className="px-4 py-3 font-mono text-xs">{row.orderId}</td>
                           <td className="px-4 py-3 font-mono text-xs">{row.checkoutId}</td>
                           <td className="px-4 py-3 text-right">{formatCurrency(row.orderAmount)}</td>
