@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ClipboardCheck,
   Loader2,
@@ -11,7 +11,10 @@ import {
   Clock,
   Trash2,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  FilePlus,
+  FilePenLine,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import Papa from "papaparse";
@@ -26,11 +29,27 @@ import {
   getReconciliationStatsAction,
   getPlatformsAction,
   batchImportReconciliationAction,
+  previewBatchReconciliationAction,
+  previewSingleRowAction,
   type CodeMatch,
   type BatchReconciliationRow,
-  type TransactionStatus
+  type TransactionStatus,
+  type RowActionType,
+  type BatchReconciliationResult
 } from "@/actions/admin-reconciliation-actions";
 import { formatCurrency } from "@/lib/utils";
+
+// Debounce helper
+function debounce<T extends (...args: Parameters<T>) => void>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
 
 const mapOrderStatusToTransaction = (orderStatus: string): TransactionStatus => {
   switch (orderStatus) {
@@ -86,7 +105,13 @@ export default function AdminReconciliationPage() {
   // Batch fields
   const [csvData, setCsvData] = useState<BatchReconciliationRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [batchResult, setBatchResult] = useState<any>(null);
+  const [batchResult, setBatchResult] = useState<BatchReconciliationResult | null>(null);
+  
+  // Preview state
+  const [rowActions, setRowActions] = useState<Record<number, RowActionType>>({});
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState<Record<number, boolean>>({});
+  const [hasInitialPreviewRun, setHasInitialPreviewRun] = useState(false);
 
   const isCommissionValid = (parseInt(commissionAmount) || 0) <= (parseInt(orderAmount) || 0);
 
@@ -108,6 +133,23 @@ export default function AdminReconciliationPage() {
     loadStats();
     loadPlatforms();
   }, []);
+
+  // Auto-trigger preview only on first run
+  useEffect(() => {
+    // Only run initial preview once
+    if (hasInitialPreviewRun || csvData.length === 0 || !selectedPlatform) {
+      return;
+    }
+    
+    const platformId = parseInt(selectedPlatform);
+    if (!isNaN(platformId)) {
+      const timer = setTimeout(async () => {
+        await runPreview(csvData, platformId);
+        setHasInitialPreviewRun(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [csvData, selectedPlatform]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,6 +259,9 @@ export default function AdminReconciliationPage() {
 
         setCsvData(parsedRows);
         setBatchResult(null);
+        setRowActions({});
+        setIsPreviewLoading({});
+        setHasInitialPreviewRun(false);
       },
       error: (err) => {
         toast.error(`Lỗi đọc file CSV: ${err.message}`);
@@ -224,8 +269,55 @@ export default function AdminReconciliationPage() {
     });
   };
 
+  // Hàm chạy preview
+  const runPreview = async (rows: BatchReconciliationRow[], platformId: number) => {
+    setIsPreviewing(true);
+    // Set loading state for all rows first (so UI can show loading)
+    const loadingState: Record<number, boolean> = {};
+    rows.forEach((_, i) => { loadingState[i] = true; });
+    setIsPreviewLoading(loadingState);
+    
+    // Small delay to make loading visible to user
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const previewRes = await previewBatchReconciliationAction(rows, platformId);
+    
+    if (previewRes.success && previewRes.data) {
+      const actionMap: Record<number, RowActionType> = {};
+      const loadingMap: Record<number, boolean> = {};
+      previewRes.data.forEach((r) => {
+        actionMap[r.rowIndex] = r.action;
+        loadingMap[r.rowIndex] = false;
+      });
+      setRowActions(actionMap);
+      setIsPreviewLoading(loadingMap);
+    } else {
+      // Nếu lỗi, clear loading
+      const loadingMap: Record<number, boolean> = {};
+      rows.forEach((_, i) => { loadingMap[i] = false; });
+      setIsPreviewLoading(loadingMap);
+    }
+    setIsPreviewing(false);
+  };
+
+  // Debounced preview cho việc thay đổi SubID/Status
+  const debouncedPreview = useMemo(
+    () => debounce((updatedRows: BatchReconciliationRow[]) => {
+      if (selectedPlatform && updatedRows.length > 0) {
+        const platformId = parseInt(selectedPlatform);
+        if (!isNaN(platformId)) {
+          runPreview(updatedRows, platformId);
+        }
+      }
+    }, 500),
+    [selectedPlatform]
+  );
+
   const removeRow = (index: number) => {
     setCsvData((prev) => prev.filter((_, i) => i !== index));
+    // Reset preview state when removing rows
+    setRowActions({});
+    setIsPreviewLoading({});
   };
 
   const updateRowCommissionPercent = (index: number, value: string) => {
@@ -234,11 +326,49 @@ export default function AdminReconciliationPage() {
   };
 
   const updateRowSubId = (index: number, value: string) => {
-    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, subId: value } : row));
+    setCsvData((prev) => {
+      const updatedRow = { ...prev[index], subId: value };
+      
+      // Preview only this row
+      if (selectedPlatform) {
+        const platformId = parseInt(selectedPlatform);
+        if (!isNaN(platformId)) {
+          setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
+          
+          previewSingleRowAction(updatedRow, platformId).then(res => {
+            if (res.success && res.data) {
+              setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
+            }
+            setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
+          });
+        }
+      }
+      
+      return prev.map((row, i) => i === index ? { ...row, subId: value } : row);
+    });
   };
 
   const updateRowStatus = (index: number, value: TransactionStatus) => {
-    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, status: value } : row));
+    setCsvData((prev) => {
+      const updatedRow = { ...prev[index], status: value };
+      
+      // Preview only this row
+      if (selectedPlatform) {
+        const platformId = parseInt(selectedPlatform);
+        if (!isNaN(platformId)) {
+          setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
+          
+          previewSingleRowAction(updatedRow, platformId).then(res => {
+            if (res.success && res.data) {
+              setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
+            }
+            setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
+          });
+        }
+      }
+      
+      return prev.map((row, i) => i === index ? { ...row, status: value } : row);
+    });
   };
 
   const handleBatchSubmit = async () => {
@@ -261,10 +391,11 @@ export default function AdminReconciliationPage() {
     setIsUploading(false);
 
     if (res.success && res.data) {
-      setBatchResult(res.data);
+      setBatchResult({ success: true, data: res.data });
       toast.success(`Đã xử lý xong ${res.data.total} dòng`);
       loadStats();
     } else {
+      setBatchResult({ success: false, error: res.error || "Có lỗi xảy ra khi import" });
       toast.error(res.error || "Có lỗi xảy ra khi import");
     }
   };
@@ -367,37 +498,48 @@ export default function AdminReconciliationPage() {
                     />
                 </div>
                 <div className="flex flex-col mt-5">
-                    <label htmlFor="csv-upload">
-                        <div className="flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer transition-colors">
-                        <Upload className="h-4 w-4 mr-2" />
-                        Chọn file CSV
+                    <label 
+                      htmlFor="csv-upload" 
+                      className={!selectedPlatform ? "cursor-not-allowed" : "cursor-pointer"}
+                    >
+                      {!selectedPlatform ? (
+                        <div className="flex h-9 items-center justify-center rounded-md bg-slate-600 px-4 text-sm font-medium text-slate-400">
+                          <Upload className="h-4 w-4 mr-2" />
+                          Chọn platform trước
                         </div>
-                        <input
+                      ) : (
+                        <div className="flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer transition-colors">
+                          <Upload className="h-4 w-4 mr-2" />
+                          Chọn file CSV
+                        </div>
+                      )}
+                      <input
                         id="csv-upload"
                         type="file"
                         accept=".csv"
                         className="hidden"
+                        disabled={!selectedPlatform}
                         onChange={handleFileUpload}
-                        />
+                      />
                     </label>
-                </div>
+                  </div>
             </div>
           </div>
 
-          {batchResult && (
-            <div className={`p-4 rounded-lg border ${batchResult.failedCount === 0 ? 'border-green-500/30 bg-green-500/20' : 'border-yellow-500/30 bg-yellow-500/20'}`}>
+          {batchResult && batchResult.data && (
+            <div className={`p-4 rounded-lg border ${batchResult.data.failedCount === 0 ? 'border-green-500/30 bg-green-500/20' : 'border-yellow-500/30 bg-yellow-500/20'}`}>
                 <h3 className="font-semibold text-white mb-2">Kết quả Import</h3>
                 <ul className="text-sm space-y-1 text-slate-300">
-                    <li>Tổng số: {batchResult.total}</li>
-                    <li className="text-green-400">Thành công: {batchResult.successCount}</li>
-                    <li className="text-yellow-400">Orphaned: {batchResult.orphanedCount}</li>
-                    <li className="text-red-400">Thất bại: {batchResult.failedCount}</li>
+                    <li>Tổng số: {batchResult.data.total}</li>
+                    <li className="text-green-400">Thành công: {batchResult.data.successCount}</li>
+                    <li className="text-yellow-400">Orphaned: {batchResult.data.orphanedCount}</li>
+                    <li className="text-red-400">Thất bại: {batchResult.data.failedCount}</li>
                 </ul>
-                {batchResult.errors && batchResult.errors.length > 0 && (
+                {batchResult.data.errors && batchResult.data.errors.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-slate-700/50">
                         <p className="text-red-400 text-sm font-semibold">Chi tiết lỗi:</p>
                         <div className="max-h-32 overflow-y-auto text-xs text-red-300 mt-1">
-                            {batchResult.errors.map((e: { row: number; error: string }, idx: number) => (
+                            {batchResult.data.errors.map((e: { row: number; error: string }, idx: number) => (
                                 <p key={idx}>Dòng {e.row}: {e.error}</p>
                             ))}
                         </div>
@@ -409,13 +551,18 @@ export default function AdminReconciliationPage() {
           {csvData.length > 0 && (
             <div className="space-y-4">
               <div className="flex justify-between items-center text-sm text-slate-400">
-                <span>Đã tải {csvData.length} dòng. Vui lòng kiểm tra và ấn Xác nhận bên dưới.</span>
+                <div className="flex items-center gap-2">
+                  <span>Đã tải {csvData.length} dòng. Vui lòng kiểm tra và ấn Xác nhận bên dưới.</span>
+                  {isPreviewing && <Loader2 className="h-4 w-4 animate-spin text-blue-400" />}
+                  {isPreviewing && <span className="text-blue-400 text-xs">Đang kiểm tra...</span>}
+                </div>
               </div>
               
               <div className="border border-slate-700 rounded-lg overflow-x-auto">
                 <table className="w-full text-sm text-left text-slate-300">
                   <thead className="text-xs text-slate-400 uppercase bg-slate-800/50">
                     <tr>
+                      <th className="px-2 py-3">Action</th>
                       <th className="px-4 py-3">SubID</th>
                       <th className="px-4 py-3">Order ID</th>
                       <th className="px-4 py-3">Checkout ID</th>
@@ -434,6 +581,19 @@ export default function AdminReconciliationPage() {
                       
                       return (
                         <tr key={index} className="border-b border-slate-700/50 hover:bg-slate-800/30">
+                          <td className="px-2 py-3 text-center">
+                            {isPreviewLoading[index] ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-slate-400 mx-auto" />
+                            ) : rowActions[index] === "create" ? (
+                              <span title="Tạo mới"><FilePlus className="h-4 w-4 text-green-400 mx-auto" /></span>
+                            ) : rowActions[index] === "update" ? (
+                              <span title="Cập nhật"><FilePenLine className="h-4 w-4 text-yellow-400 mx-auto" /></span>
+                            ) : rowActions[index] === "skip" ? (
+                              <span title="Bỏ qua (đã tồn tại)"><X className="h-4 w-4 text-red-400 mx-auto" /></span>
+                            ) : (
+                              <div className="h-4 w-4 mx-auto">{ rowActions[index] }</div>
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             <Input 
                               value={row.subId}

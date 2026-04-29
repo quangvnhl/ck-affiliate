@@ -401,6 +401,154 @@ export interface BatchReconciliationResult {
   error?: string;
 }
 
+// ============================================
+// PREVIEW ACTION - Kiểm tra trước khi import
+// ============================================
+
+export type RowActionType = "create" | "update" | "skip";
+
+export interface RowPreviewResult {
+  rowIndex: number;
+  action: RowActionType;
+  reason?: string;
+}
+
+export async function previewBatchReconciliationAction(
+  rows: BatchReconciliationRow[],
+  platformId: number
+): Promise<{ success: boolean; data?: RowPreviewResult[]; error?: string }> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "admin") {
+    return { success: false, error: "Không có quyền admin" };
+  }
+
+  const results: RowPreviewResult[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    // Kiểm tra transaction đã tồn tại chưa
+    const existingTransactions = await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.orderIdExternal, row.orderId),
+          eq(transactions.trash, false)
+        )
+      );
+
+    // Nếu không tìm thấy theo orderId, thử tìm theo checkoutId
+    if (existingTransactions.length === 0 && row.checkoutId) {
+      const byCheckoutId = await db
+        .select()
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.checkoutId, row.checkoutId),
+            eq(transactions.trash, false)
+          )
+        );
+      if (byCheckoutId.length > 0) {
+        existingTransactions.push(...byCheckoutId);
+      }
+    }
+
+    if (existingTransactions.length === 0) {
+      // Không tồn tại → Tạo mới
+      results.push({ rowIndex: i, action: "create" });
+    } else {
+      const existingTx = existingTransactions[0];
+      if (existingTx.status === "pending" && row.status !== "pending") {
+        // Tồn tại + pending + CSV có thay đổi → Cập nhật
+        results.push({ 
+          rowIndex: i, 
+          action: "update",
+          reason: `Cập nhật status: ${existingTx.status} → ${row.status}`
+        });
+      } else {
+        // Tồn tại + đã confirmed/rejected/paid hoặc CSV vẫn pending → Bỏ qua
+        results.push({ 
+          rowIndex: i, 
+          action: "skip",
+          reason: `Đã tồn tại (status: ${existingTx.status})`
+        });
+      }
+    }
+  }
+
+  return { success: true, data: results };
+}
+
+// ============================================
+// PREVIEW SINGLE ROW - Kiểm tra 1 dòng
+// ============================================
+
+export async function previewSingleRowAction(
+  row: BatchReconciliationRow,
+  platformId: number
+): Promise<{ success: boolean; data?: { rowIndex: number; action: RowActionType; reason?: string }; error?: string }> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "admin") {
+    return { success: false, error: "Không có quyền admin" };
+  }
+
+  // Kiểm tra transaction đã tồn tại chưa
+  const existingTransactions = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.orderIdExternal, row.orderId),
+        eq(transactions.trash, false)
+      )
+    );
+
+  // Nếu không tìm thấy theo orderId, thử tìm theo checkoutId
+  if (existingTransactions.length === 0 && row.checkoutId) {
+    const byCheckoutId = await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.checkoutId, row.checkoutId),
+          eq(transactions.trash, false)
+        )
+      );
+    if (byCheckoutId.length > 0) {
+      existingTransactions.push(...byCheckoutId);
+    }
+  }
+
+  if (existingTransactions.length === 0) {
+    // Không tồn tại → Tạo mới
+    return { success: true, data: { rowIndex: 0, action: "create" } };
+  }
+
+  const existingTx = existingTransactions[0];
+  if (existingTx.status === "pending" && row.status !== "pending") {
+    // Tồn tại + pending + CSV có thay đổi → Cập nhật
+    return { 
+      success: true, 
+      data: { 
+        rowIndex: 0, 
+        action: "update",
+        reason: `Cập nhật status: ${existingTx.status} → ${row.status}`
+      }
+    };
+  }
+
+  // Tồn tại + đã confirmed/rejected/paid hoặc CSV vẫn pending → Bỏ qua
+  return { 
+    success: true, 
+    data: { 
+      rowIndex: 0, 
+      action: "skip",
+      reason: `Đã tồn tại (status: ${existingTx.status})`
+    }
+  };
+}
+
 export async function batchImportReconciliationAction(input: BatchReconciliationInput): Promise<BatchReconciliationResult> {
   const session = await auth();
   if (!session?.user || session.user.role !== "admin") {
