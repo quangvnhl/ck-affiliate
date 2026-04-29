@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { eq, and, sql } from "drizzle-orm";
-import { systemSettings, reconciliationLogs, affiliateLinks, transactions, users, platforms } from "@/db/schema";
+import { systemSettings, reconciliationLogs, affiliateLinks, transactions, users, platforms, type Transaction, type AffiliateLink } from "@/db/schema";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
@@ -26,9 +26,9 @@ interface ReconciliationInput {
 interface ReconciliationResult {
   success: boolean;
   data?: {
-    transaction: any;
-    link: any;
-    user: any;
+    transaction: Transaction;
+    link: AffiliateLink | null;
+    user: { id: string; email: string | null } | null;
     orderAmount: number;
     commissionAmount: number;
     commissionPercent: number;
@@ -36,7 +36,7 @@ interface ReconciliationResult {
     points: number;
   };
   error?: string;
-  codeMatches?: any[];
+  codeMatches?: CodeMatch[];
 }
 
 function parseSubIdToCode(subId: string): string | null {
@@ -136,7 +136,7 @@ export async function createReconciliationAction(input: ReconciliationInput): Pr
     return {
       success: false,
       error: "Tìm thấy nhiều link khớp. Vui lòng chọn.",
-      codeMatches: links.map((l: any) => ({
+      codeMatches: links.map((l: typeof affiliateLinks.$inferSelect) => ({
         id: l.id,
         code: l.code,
         userId: l.userId,

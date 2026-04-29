@@ -1,9 +1,9 @@
 "use server";
 
-import { eq, sql, desc, and, gte, lte } from "drizzle-orm";
+import { eq, sql, desc, and, gte, isNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
-import { users, transactions, withdrawalRequests, platforms } from "@/db/schema";
+import { users, transactions, platforms } from "@/db/schema";
 import { auth } from "@/auth";
 import type { Result } from "@/types";
 
@@ -13,7 +13,7 @@ import type { Result } from "@/types";
 
 export interface AdminTransactionItem {
     id: string;
-    type: "cashback" | "withdrawal" | "commission";
+    type: "withdrawal" | "commission";
     userId: string;
     userEmail: string;
     amount: number;
@@ -55,7 +55,8 @@ async function checkAdminPermission(): Promise<Result<string>> {
 // ============================================
 
 export async function getAdminTransactionsAction(
-    filter?: "all" | "cashback" | "withdrawal" | "commission" | "orphaned"
+    status?: "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned",
+    type?: "all" | "commission" | "withdrawal"
 ): Promise<Result<AdminTransactionItem[]>> {
     try {
         const permCheck = await checkAdminPermission();
@@ -64,101 +65,56 @@ export async function getAdminTransactionsAction(
         }
 
         const result: AdminTransactionItem[] = [];
+        const conditions = [];
 
-        // Lấy transactions (cashback/commission)
-        if (!filter || filter === "all" || filter === "cashback" || filter === "commission" || filter === "orphaned") {
-            const isOrphaned = filter === "orphaned";
-            const cashbacks = await db
-                .select({
-                    id: transactions.id,
-                    userId: transactions.userId,
-                    amount: transactions.cashbackAmount,
-                    status: transactions.status,
-                    orderIdExternal: transactions.orderIdExternal,
-                    platformId: transactions.platformId,
-                    type: transactions.type,
-                    createdAt: transactions.createdAt,
-                })
-                .from(transactions)
-                .where(isOrphaned ? eq(transactions.status, "orphaned") : undefined)
-                .orderBy(desc(transactions.createdAt))
-                .limit(100);
+        // Type filter
+        if (type && type !== "all") {
+            conditions.push(eq(transactions.type, type));
+        }
 
-            // Lấy user email và platform name
-            for (const tx of cashbacks) {
-                if (!tx.userId && !isOrphaned) continue;
-
-                let userEmail = "N/A";
-                if (tx.userId) {
-                    const user = await db
-                        .select({ email: users.email })
-                        .from(users)
-                        .where(eq(users.id, tx.userId))
-                        .limit(1);
-                    userEmail = user[0]?.email || "N/A";
-                }
-
-                let platformName = "Unknown";
-                if (tx.platformId) {
-                    const platform = await db
-                        .select({ name: platforms.name })
-                        .from(platforms)
-                        .where(eq(platforms.id, tx.platformId))
-                        .limit(1);
-                    platformName = platform[0]?.name || "Unknown";
-                }
-
-                result.push({
-                    id: tx.id,
-                    type: tx.type === "withdrawal" ? "withdrawal" : "commission",
-                    userId: tx.userId || "",
-                    userEmail: userEmail,
-                    amount: Number(tx.amount) || 0,
-                    status: tx.status,
-                    platformName,
-                    orderIdExternal: tx.orderIdExternal || undefined,
-                    createdAt: tx.createdAt,
-                });
+        // Status filter
+        if (status && status !== "all") {
+            if (status === "orphaned") {
+                // Orphaned = userId is null
+                conditions.push(isNull(transactions.userId));
+            } else {
+                conditions.push(eq(transactions.status, status));
             }
         }
 
-        // Lấy withdrawals
-        if (!filter || filter === "all" || filter === "withdrawal") {
-            const withdrawals = await db
-                .select({
-                    id: withdrawalRequests.id,
-                    userId: withdrawalRequests.userId,
-                    amount: withdrawalRequests.amount,
-                    status: withdrawalRequests.status,
-                    createdAt: withdrawalRequests.createdAt,
-                })
-                .from(withdrawalRequests)
-                .orderBy(desc(withdrawalRequests.createdAt))
-                .limit(100);
+        const txRecords = await db
+            .select({
+                id: transactions.id,
+                userId: transactions.userId,
+                type: transactions.type,
+                userEmail: users.email,
+                amount: transactions.cashbackAmount,
+                status: transactions.status,
+                orderIdExternal: transactions.orderIdExternal,
+                platformId: transactions.platformId,
+                platformName: platforms.name,
+                createdAt: transactions.createdAt,
+            })
+            .from(transactions)
+            .leftJoin(users, eq(transactions.userId, users.id))
+            .leftJoin(platforms, eq(transactions.platformId, platforms.id))
+            .where(conditions.length > 0 ? and(...conditions) : undefined)
+            .orderBy(desc(transactions.createdAt))
+            .limit(100);
 
-            for (const wd of withdrawals) {
-                if (!wd.userId) continue;
-
-                const user = await db
-                    .select({ email: users.email })
-                    .from(users)
-                    .where(eq(users.id, wd.userId))
-                    .limit(1);
-
-                result.push({
-                    id: wd.id,
-                    type: "withdrawal",
-                    userId: wd.userId,
-                    userEmail: user[0]?.email || "N/A",
-                    amount: Number(wd.amount) || 0,
-                    status: wd.status,
-                    createdAt: wd.createdAt,
-                });
-            }
+        for (const tx of txRecords) {
+            result.push({
+                id: tx.id,
+                type: tx.type === "withdrawal" ? "withdrawal" : "commission",
+                userId: tx.userId || "",
+                userEmail: tx.userEmail || (tx.userId ? "N/A" : "Khách"),
+                amount: Number(tx.amount) || 0,
+                status: tx.status,
+                platformName: tx.platformName || undefined,
+                orderIdExternal: tx.orderIdExternal || undefined,
+                createdAt: tx.createdAt,
+            });
         }
-
-        // Sort by createdAt desc
-        result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
         return { success: true, data: result.slice(0, 100) };
     } catch (error) {
@@ -182,31 +138,46 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
         const cashbackSum = await db
             .select({ total: sql<number>`COALESCE(sum(${transactions.cashbackAmount}), 0)` })
             .from(transactions)
-            .where(eq(transactions.status, "confirmed"));
+            .where(and(
+                eq(transactions.status, "confirmed"),
+                eq(transactions.type, "commission")
+            ));
 
-        // Tổng đã rút (approved)
+        // Tổng đã rút (type=withdrawal, status=paid)
         const withdrawnSum = await db
-            .select({ total: sql<number>`COALESCE(sum(${withdrawalRequests.amount}), 0)` })
-            .from(withdrawalRequests)
-            .where(eq(withdrawalRequests.status, "approved"));
+            .select({ total: sql<number>`COALESCE(sum(${transactions.cashbackAmount}), 0)` })
+            .from(transactions)
+            .where(and(
+                eq(transactions.status, "paid"),
+                eq(transactions.type, "withdrawal")
+            ));
 
-        // Pending withdrawals count
+        // Pending withdrawals (type=withdrawal, status=pending)
         const pendingWdCount = await db
             .select({ count: sql<number>`count(*)` })
-            .from(withdrawalRequests)
-            .where(eq(withdrawalRequests.status, "pending"));
+            .from(transactions)
+            .where(and(
+                eq(transactions.status, "pending"),
+                eq(transactions.type, "withdrawal")
+            ));
 
         // Pending transactions count
         const pendingTxCount = await db
             .select({ count: sql<number>`count(*)` })
             .from(transactions)
-            .where(eq(transactions.status, "pending"));
+            .where(and(
+                eq(transactions.status, "pending"),
+                eq(transactions.type, "commission")
+            ));
 
         // Orphaned transactions count
         const orphanedCount = await db
             .select({ count: sql<number>`count(*)` })
             .from(transactions)
-            .where(eq(transactions.status, "orphaned"));
+            .where(and(
+                eq(transactions.status, "orphaned"),
+                eq(transactions.type, "commission")
+            ));
 
         // Today transactions
         const today = new Date();

@@ -30,6 +30,8 @@ import {
     type TransactionStats,
 } from "@/actions/admin-transaction-actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { or } from "drizzle-orm";
+import { type } from '../../../../../.next/dev/types/routes';
 
 export default function AdminTransactionsPage() {
     const router = useRouter();
@@ -37,11 +39,19 @@ export default function AdminTransactionsPage() {
     const [transactions, setTransactions] = useState<AdminTransactionItem[]>([]);
     const [stats, setStats] = useState<TransactionStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+
     const statusParam = searchParams.get("status");
-    const initialFilter = statusParam === "commission" || statusParam === "withdrawal" || statusParam === "orphaned"
-        ? statusParam
+    const typeParam = searchParams.get("type");
+
+    const initialStatus = statusParam && ["all", "pending", "confirmed", "rejected", "paid", "orphaned"].includes(statusParam) 
+        ? statusParam as "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned"
         : "all";
-    const [filter, setFilter] = useState<"all" | "commission" | "withdrawal" | "orphaned">(initialFilter);
+    const initialType = typeParam && ["all", "commission", "withdrawal"].includes(typeParam) 
+        ? typeParam as "all" | "commission" | "withdrawal"
+        : "all";
+
+    const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned">(initialStatus);
+    const [typeFilter, setTypeFilter] = useState<"all" | "commission" | "withdrawal">(initialType);
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [claimEmail, setClaimEmail] = useState("");
@@ -52,7 +62,7 @@ export default function AdminTransactionsPage() {
     const loadData = useCallback(async () => {
         setIsLoading(true);
         const [txResult, statsResult] = await Promise.all([
-            getAdminTransactionsAction(filter),
+            getAdminTransactionsAction(statusFilter, typeFilter),
             getAdminTransactionStatsAction(),
         ]);
 
@@ -63,15 +73,32 @@ export default function AdminTransactionsPage() {
             setStats(statsResult.data);
         }
         setIsLoading(false);
-    }, [filter]);
+    }, [statusFilter, typeFilter]);
 
     useEffect(() => {
         loadData();
     }, [loadData]);
 
-    const handleFilterChange = (newFilter: typeof filter) => {
-        setFilter(newFilter);
-        router.push(`/admin/transactions?status=${newFilter}`, { scroll: false });
+    const handleStatusChange = (newStatus: "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned") => {
+        setStatusFilter(newStatus);
+        const params = new URLSearchParams(searchParams.toString());
+        if (newStatus === "all") {
+            params.delete("status");
+        } else {
+            params.set("status", newStatus);
+        }
+        router.push(`/admin/transactions?${params.toString()}`, { scroll: false });
+    };
+
+    const handleTypeChange = (newType: "all" | "commission" | "withdrawal") => {
+        setTypeFilter(newType);
+        const params = new URLSearchParams(searchParams.toString());
+        if (newType === "all") {
+            params.delete("type");
+        } else {
+            params.set("type", newType);
+        }
+        router.push(`/admin/transactions?${params.toString()}`, { scroll: false });
     };
 
     const filteredTransactions = transactions.filter(
@@ -228,7 +255,7 @@ export default function AdminTransactionsPage() {
                     label="Chờ duyệt rút"
                     value={stats?.pendingWithdrawals || 0}
                     icon={Clock}
-                    color="orange"
+                    color="yellow"
                 />
                 <StatCard
                     label="Chờ xử lý"
@@ -259,22 +286,43 @@ export default function AdminTransactionsPage() {
 
                 <div className="flex items-center gap-2">
                     <Filter className="h-4 w-4 text-slate-400" />
-                    <select
-                        value={filter}
-                        onChange={(e) => {
-                            handleFilterChange(e.target.value as typeof filter);
-                            setSelectedIds(new Set());
-                            setClaimEmail("");
-                            setRejectReason("");
-                        }}
-                        className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                        <option value="all">Tất cả</option>
-                        <option value="commission">Hoa hồng</option>
-                        <option value="withdrawal">Rút tiền</option>
-                        <option value="orphaned">Không xác định</option>
-                    </select>
+                    <span className="text-sm text-slate-400">Lọc:</span>
                 </div>
+
+                {/* Type Filter */}
+                <select
+                    value={typeFilter}
+                    onChange={(e) => {
+                        handleTypeChange(e.target.value as "all" | "commission" | "withdrawal");
+                        setSelectedIds(new Set());
+                        setClaimEmail("");
+                        setRejectReason("");
+                    }}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                    <option value="all">Tất cả loại</option>
+                    <option value="commission">Hoa hồng</option>
+                    <option value="withdrawal">Rút tiền</option>
+                </select>
+
+                {/* Status Filter */}
+                <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                        handleStatusChange(e.target.value as "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned");
+                        setSelectedIds(new Set());
+                        setClaimEmail("");
+                        setRejectReason("");
+                    }}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="pending">Chờ xử lý</option>
+                    <option value="confirmed">Đã xác nhận</option>
+                    <option value="rejected">Từ chối</option>
+                    <option value="paid">Đã thanh toán</option>
+                    <option value="orphaned">Không xác định</option>
+                </select>
 
                 <span className="text-sm text-slate-400">
                     {filteredTransactions.length} giao dịch
@@ -283,73 +331,90 @@ export default function AdminTransactionsPage() {
 
             {/* Batch Actions */}
             {selectedIds.size > 0 && (
-                <div className="space-y-2">
-                    {/* Orphaned Actions */}
-                    {(filter === "orphaned" || filter === "all") && selectedIds.size > 0 && (
-                        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 flex flex-wrap gap-2 items-center">
-                            <span className="text-xs text-yellow-400 font-medium">Orphaned:</span>
-                            <Input
-                                value={claimEmail}
-                                onChange={(e) => setClaimEmail(e.target.value)}
-                                placeholder="Email user..."
-                                className="w-48 bg-slate-800 border-slate-700 text-slate-50 text-sm"
-                            />
-                            <Button
-                                onClick={handleClaimOrphaned}
-                                disabled={processing}
-                                className="bg-green-600 hover:bg-green-700 text-sm py-1"
-                            >
-                                Gán
-                            </Button>
-                            <Input
-                                value={rejectReason}
-                                onChange={(e) => setRejectReason(e.target.value)}
-                                placeholder="Lý do..."
-                                className="w-32 bg-slate-800 border-slate-700 text-slate-50 text-sm"
-                            />
-                            <Button
-                                onClick={handleRejectOrphaned}
-                                disabled={!rejectReason || processing}
-                                variant="destructive"
-                                className="text-sm py-1"
-                            >
-                                Từ chối
-                            </Button>
-                            <Button
-                                onClick={handleDeleteOrphaned}
-                                disabled={processing}
-                                variant="outline"
-                                className="border-red-500/50 text-red-400 hover:bg-red-500/20 text-sm py-1"
-                            >
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
+                <div className="space-y-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                    <span className="text-yellow-400 text-sm ml-2">
+                        {selectedIds.size} chọn
+                    </span>
+                    {(statusFilter === "orphaned" || statusFilter === "all") && selectedIds.size > 0 && (
+                        <div className=" flex gap-2 flex-col md:flex-row md:items-center">
+                            <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3">
+                                <p className="text-xs text-green-400 font-medium mb-2">Gán cho user:</p>
+                                <div className=" flex flex-wrap gap-2 items-center">
+                                    <Input
+                                        value={claimEmail}
+                                        onChange={(e) => setClaimEmail(e.target.value)}
+                                        placeholder="Email user..."
+                                        className="w-48 bg-slate-800 border-slate-700 text-slate-50 text-sm"
+                                    />
+                                    <Button
+                                        onClick={handleClaimOrphaned}
+                                        disabled={processing}
+                                        className="bg-green-600 hover:bg-green-700 text-sm py-1"
+                                    >
+                                        Gán
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                                <p className="text-xs text-red-400 font-medium mb-2">Lý do từ chối:</p>
+                                <div className=" flex flex-wrap gap-2 items-center">
+                                    <Input
+                                        value={rejectReason}
+                                        onChange={(e) => setRejectReason(e.target.value)}
+                                        placeholder="Lý do..."
+                                        className="w-32 bg-slate-800 border-slate-700 text-slate-50 text-sm"
+                                    />
+                                    <Button
+                                        onClick={handleRejectOrphaned}
+                                        disabled={!rejectReason || processing}
+                                        variant="destructive"
+                                        className="text-sm py-1"
+                                    >
+                                        Từ chối
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                                <p className="text-xs text-red-400 font-medium mb-2">Xóa:</p>
+                                <div className=" flex flex-wrap gap-2 items-center">
+                                    <Button
+                                        onClick={handleDeleteOrphaned}
+                                        disabled={processing}
+                                        variant="outline"
+                                        className="border-red-500/50 text-red-400 hover:bg-red-500/20 text-sm py-1"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Change Status Group */}
+                            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3">
+                                <p className="text-xs text-blue-400 font-medium mb-2">Đổi trạng thái:</p>
+                                <div className="flex flex-wrap gap-2 items-center">
+                                    <select
+                                        value={batchStatus}
+                                        onChange={(e) => setBatchStatus(e.target.value)}
+                                        className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50"
+                                    >
+                                        <option value="">Chọn...</option>
+                                        <option value="confirmed">Đã xác nhận</option>
+                                        <option value="pending">Chờ xử lý</option>
+                                        <option value="orphaned">Không xác định</option>
+                                    </select>
+                                    <Button
+                                        onClick={handleBatchStatusChange}
+                                        disabled={!batchStatus || processing}
+                                        className="bg-blue-600 hover:bg-blue-700 text-sm py-1"
+                                    >
+                                        Áp dụng
+                                    </Button>
+                                    
+                                </div>
+                            </div>
                         </div>
                     )}
-
-                    {/* Change Status Group */}
-                    <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 flex flex-wrap gap-2 items-center">
-                        <span className="text-xs text-blue-400 font-medium">Đổi trạng thái:</span>
-                        <select
-                            value={batchStatus}
-                            onChange={(e) => setBatchStatus(e.target.value)}
-                            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50"
-                        >
-                            <option value="">Chọn...</option>
-                            <option value="confirmed">Đã xác nhận</option>
-                            <option value="pending">Chờ xử lý</option>
-                            <option value="orphaned">Không xác định</option>
-                        </select>
-                        <Button
-                            onClick={handleBatchStatusChange}
-                            disabled={!batchStatus || processing}
-                            className="bg-blue-600 hover:bg-blue-700 text-sm py-1"
-                        >
-                            Áp dụng
-                        </Button>
-                        <span className="text-yellow-400 text-sm ml-2">
-                            {selectedIds.size} chọn
-                        </span>
-                    </div>
                 </div>
             )}
 
@@ -360,13 +425,13 @@ export default function AdminTransactionsPage() {
                         <tr className="border-b border-slate-700 bg-slate-800/50">
                             <th className="px-4 py-3 w-8"></th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
-                                Loại
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                                 Email
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                                 Số tiền
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                                Loại
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">
                                 Trạng thái
@@ -394,38 +459,15 @@ export default function AdminTransactionsPage() {
                                     />
                                 </td>
                                 <td className="px-4 py-3">
-                                    <div className="flex items-center gap-2">
-                                        {tx.status === "orphaned" ? (
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/20">
-                                                <AlertCircle className="h-4 w-4 text-red-400" />
-                                            </div>
-                                        ) : tx.type === "commission" ? (
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-500/20">
-                                                <ArrowDownCircle className="h-4 w-4 text-green-400" />
-                                            </div>
-) : tx.type === "withdrawal" ? (
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20">
-                                                <ArrowUpCircle className="h-4 w-4 text-cyan-400" />
-                                            </div>
-                                        ) : (
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/20">
-                                                <ArrowUpCircle className="h-4 w-4 text-red-400" />
-                                            </div>
-                                        )}
-                                        <span className="text-sm text-slate-300">
-                                            {tx.status === "orphaned"
-                                                ? "Orphaned"
-                                                : tx.type === "commission"
-                                                ? "Cashback"
-                                                : tx.type === "withdrawal"
-                                                ? "Rút tiền"
-                                                : "Khác"}
-                                        </span>
-                                    </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <p className="text-sm text-slate-50">{tx.userEmail}</p>
-                                    <p className="text-xs text-slate-500">{tx.id.slice(0, 8)}...</p>
+                                    {tx.status === "orphaned" ? (
+                                        <span className="text-sm bg-red-500/20 text-red-400 px-2 rounded-2xl">Anonymous</span>
+                                    ) : (
+                                        <>
+                                            <p className="text-sm text-slate-50">{tx.userEmail}</p>
+                                            <p className="text-xs text-slate-500">{tx.id.slice(0, 8)}...</p>
+                                        </>
+                                    )}
+                                    
                                 </td>
                                 <td className="px-4 py-3">
                                     <span
@@ -440,6 +482,9 @@ export default function AdminTransactionsPage() {
                                             : formatCurrency(tx.amount)
                                         }
                                     </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                    <TypeBadge type={tx.type} />
                                 </td>
                                 <td className="px-4 py-3">
                                     <StatusBadge status={tx.status} type={tx.type} />
@@ -514,35 +559,48 @@ function StatCard({
     );
 }
 
-function StatusBadge({ status, type }: { status: string; type?: string }) {
+function TypeBadge({ type }: { type: "withdrawal" | "commission";  }) {
+  
+
     if (type === "withdrawal") {
         return (
-            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-cyan-500/20 text-cyan-400">
+            <span className="inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-xs font-medium bg-cyan-500/20 text-cyan-400">
+                <ArrowUpCircle className="h-3 w-3" />
                 Rút tiền
             </span>
         );
     }
 
+    return (
+        <span className="inline-flex items-center gap-2 rounded-full px-2 py-0.5 text-xs font-medium bg-green-500/20 text-green-400">
+            <ArrowDownCircle className="h-3 w-3" />
+            Hoa hồng
+        </span>
+    );
+}
+
+function StatusBadge({ status, type }: { status: string; type: "withdrawal" | "commission" }) {
     const styles: Record<string, string> = {
-        pending: "bg-orange-500/20 text-orange-400",
+        pending: type === "commission" ? "bg-orange-500/20 text-orange-400" : "bg-yellow-300/20 text-yellow-300",
         confirmed: "bg-green-500/20 text-green-400",
         rejected: "bg-red-500/20 text-red-400",
-        paid: "bg-green-500/20 text-green-400",
+        paid: "bg-blue-500/20 text-blue-400",
+        approved: "bg-blue-500/20 text-blue-400",
         orphaned: "bg-red-500/20 text-red-400",
     };
 
     const labels: Record<string, string> = {
-        pending: "Chờ xử lý",
+        pending: type === "commission" ? "Chờ xử lý" : "Chờ duyệt rút",
         confirmed: "Đã xác nhận",
         rejected: "Từ chối",
         paid: "Đã thanh toán",
+        approved: "Đã duyệt",
         orphaned: "Không xác định",
     };
 
     return (
         <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] || styles.pending
-                }`}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] || styles.pending}`}
         >
             {labels[status] || status}
         </span>
