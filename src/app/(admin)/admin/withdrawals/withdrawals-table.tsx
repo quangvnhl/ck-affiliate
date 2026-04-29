@@ -27,7 +27,7 @@ interface WithdrawalRequest {
   userEmail: string | null;
   userId: string | null;
   amount: string;
-  bankSnapshot: BankSnapshot | any;
+  bankSnapshot: BankSnapshot;
   status: string;
   createdAt: Date;
   processedAt: Date | null;
@@ -80,7 +80,7 @@ function StatusBadge({ status }: { status: string }) {
 // ============================================
 
 interface WithdrawalsTableProps {
-  data: any[];
+  data: WithdrawalRequest[];
   tableType: "pending" | "approved" | "paid" | "rejected";
 }
 

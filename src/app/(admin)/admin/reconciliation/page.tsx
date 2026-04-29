@@ -174,8 +174,9 @@ export default function AdminReconciliationPage() {
       skipEmptyLines: true,
       complete: (results) => {
         const parsedRows: BatchReconciliationRow[] = [];
+        const data = results.data as Record<string, string>[];
         
-        results.data.forEach((row: any) => {
+        data.forEach((row) => {
           const subId = row["Sub Id 1"] || row["SubID"] || row["sub_id_1"] || "";
           const orderId = row["ID đơn hàng"] || row["Order ID"] || row["order_id"] || "";
           const orderAmountStr = row["Giá trị đơn hàng (₫)"] || row["Order Amount"] || row["order_amount"] || "0";
@@ -372,7 +373,7 @@ export default function AdminReconciliationPage() {
                     <div className="mt-2 pt-2 border-t border-slate-700/50">
                         <p className="text-red-400 text-sm font-semibold">Chi tiết lỗi:</p>
                         <div className="max-h-32 overflow-y-auto text-xs text-red-300 mt-1">
-                            {batchResult.errors.map((e: any, idx: number) => (
+                            {batchResult.errors.map((e: { row: number; error: string }, idx: number) => (
                                 <p key={idx}>Dòng {e.row}: {e.error}</p>
                             ))}
                         </div>
@@ -586,7 +587,7 @@ export default function AdminReconciliationPage() {
               {/* Code Matches Selection */}
               {result?.codeMatches && (
                 <div className="mt-4 space-y-2">
-                  {result.codeMatches.map((link: any) => (
+                  {result.codeMatches.map((link: CodeMatch) => (
                     <div
                       key={link.id}
                       onClick={() => setSelectedLinkId(link.id)}

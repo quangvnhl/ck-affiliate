@@ -376,7 +376,7 @@ export interface BatchReconciliationRow {
   checkoutId: string;
   commissionAmount: number;
   commissionPercent?: number;
-  rawData: any;
+  rawData: Record<string, unknown>;
 }
 
 export interface BatchReconciliationInput {
@@ -513,9 +513,10 @@ export async function batchImportReconciliationAction(input: BatchReconciliation
       });
       successCount++;
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       failedCount++;
-      errors.push({ row: i + 1, error: err.message || "Lỗi không xác định" });
+      const errorMessage = err instanceof Error ? err.message : "Lỗi không xác định";
+      errors.push({ row: i + 1, error: errorMessage });
     }
   }
 

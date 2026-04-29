@@ -374,10 +374,19 @@ export async function getWithdrawalRequestsAction(
       .leftJoin(users, eq(withdrawalRequests.userId, users.id))
       .orderBy(withdrawalRequests.createdAt);
 
-    // Filter by status if provided
-    const results = status
-      ? await query.where(eq(withdrawalRequests.status, status))
-      : await query;
+    // Cast bankSnapshot to proper type and filter by status if provided
+    let results = (await query).map((row) => ({
+      ...row,
+      bankSnapshot: row.bankSnapshot as {
+        bankName: string;
+        accountNumber: string;
+        accountHolder: string;
+      },
+    }));
+
+    if (status) {
+      results = results.filter((r) => r.status === status);
+    }
 
     return { success: true, data: results };
   } catch (error) {
