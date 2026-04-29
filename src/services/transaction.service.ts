@@ -231,11 +231,15 @@ export async function syncOrdersFromPlatform(
                     await db.insert(transactions).values({
                         userId,
                         platformId,
+                        type: "commission",
                         orderIdExternal: order.orderId,
                         orderAmount: order.amount.toString(),
-                        commissionReceived: order.commission.toString(),
+                        commissionAmount: order.commission.toString(),
                         cashbackAmount: cashbackAmount.toString(),
+                        commissionPercent: 70,
+                        points: Math.floor(cashbackAmount / 1000),
                         status: mappedStatus,
+                        rawData: order,
                     });
 
                     result.inserted++;

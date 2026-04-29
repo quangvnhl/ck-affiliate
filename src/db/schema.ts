@@ -61,7 +61,7 @@ export const affiliateLinks = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => users.id), // Null nếu là khách vãng lai
 
-    // QUAN TRỌNG: Dùng để map dữ liệu khi khách đăng ký thành viên
+    // QUAN TRỌNG: Dùng map dữ liệu khi khách đăng ký thành viên
     guestSessionId: varchar("guest_session_id", { length: 100 }),
 
     originalUrl: text("original_url").notNull(),
@@ -77,6 +77,11 @@ export const affiliateLinks = pgTable(
     metaData: jsonb("meta_data"),
 
     clicks: integer("clicks").default(0).notNull(),
+
+    // Status để block link khi cần
+    status: varchar("status", { length: 20 }).default("open").notNull(), // 'open', 'blocked'
+    note: text("note"), // Ghi lý do block
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -84,28 +89,39 @@ export const affiliateLinks = pgTable(
     index("idx_links_user").on(table.userId),
     index("idx_links_guest").on(table.guestSessionId),
     index("idx_links_code").on(table.code), // Fast lookup for redirects
+    index("idx_links_status").on(table.status), // Filter links by status
   ]
 );
 
 // ============================================
 // 4. BẢNG TRANSACTIONS
-// Dòng tiền VÀO - Cashback từ đơn hàng
+// Dòng tiền VÀO (commission) và RA (withdrawal)
 // ============================================
 export const transactions = pgTable(
   "transactions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => users.id),
+    affiliateLinkId: uuid("affiliate_link_id").references(() => affiliateLinks.id),
     platformId: integer("platform_id").references(() => platforms.id),
 
+    // Type: commission (vào) hoặc withdrawal (ra)
+    type: varchar("type", { length: 20 }).default("commission").notNull(), // 'commission', 'withdrawal'
+
     orderIdExternal: varchar("order_id_external", { length: 100 }), // Mã đơn hàng từ sàn
-
     orderAmount: decimal("order_amount", { precision: 15, scale: 2 }),
-    commissionReceived: decimal("commission_received", { precision: 15, scale: 2 }),
+    checkoutId: varchar("checkout_id", { length: 100 }),
+    commissionAmount: decimal("commission_amount", { precision: 15, scale: 2 }),
     cashbackAmount: decimal("cashback_amount", { precision: 15, scale: 2 }),
+    commissionPercent: integer("commission_percent").default(70), // % hoa hồng (từ setting hoặc mặc định)
 
-    status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'approved', 'rejected'
+    // Points: điểm quy đổi (dương: vào, âm: ra)
+    points: integer("points"),
+
+    status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'confirmed', 'rejected', 'paid'
     rejectionReason: text("rejection_reason"),
+
+    rawData: jsonb("raw_data"), // Lưu thông tin đầy đủ từ Shopee
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -113,7 +129,64 @@ export const transactions = pgTable(
   (table) => [
     // Index để check trùng đơn hàng nhanh
     index("idx_trans_order").on(table.orderIdExternal),
+    // Index để query points theo user + status
+    index("idx_trans_user_status").on(table.userId, table.status),
   ]
+);
+
+// ============================================
+// 4.1 BẢNG SYSTEM SETTINGS
+// Lưu cấu hình hệ thống (tỷ giá điểm, % hoa hồng, v.v.)
+// ============================================
+export const systemSettings = pgTable(
+  "system_settings",
+  {
+    id: serial("id").primaryKey(),
+    key: varchar("key", { length: 100 }).unique().notNull(),
+    value: jsonb("value").notNull(), // Lưu dạng JSON (vd: "1000" cho points_exchange_rate)
+    description: text("description"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
+);
+
+// ============================================
+// 4.2 BẢNG RECONCILIATION LOGS
+// Log các thao tác đối soát của admin
+// ============================================
+export const reconciliationLogs = pgTable(
+  "reconciliation_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    adminId: uuid("admin_id").references(() => users.id),
+    transactionId: uuid("transaction_id").references(() => transactions.id),
+
+    action: varchar("action", { length: 50 }).notNull(), // 'created', 'confirmed', 'rejected', 'paid'
+    note: text("note"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  }
+);
+
+// ============================================
+// 4.3 BẢNG DISPUTES
+// Khiếu nại từ user về kết quả đối soát
+// ============================================
+export const disputes = pgTable(
+  "disputes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    transactionId: uuid("transaction_id").references(() => transactions.id),
+    userId: uuid("user_id").references(() => users.id),
+
+    reason: text("reason").notNull(),
+    status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'reviewed', 'resolved'
+    adminNote: text("admin_note"),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
 );
 
 // ============================================
@@ -131,7 +204,8 @@ export const withdrawalRequests = pgTable(
     // Snapshot thông tin ngân hàng TẠI THỜI ĐIỂM RÚT
     bankSnapshot: jsonb("bank_snapshot").notNull(),
 
-    status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'approved', 'rejected'
+    // Status: pending → approved → processing → paid (hoặc rejected)
+    status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'approved', 'processing', 'paid', 'rejected'
 
     adminNote: text("admin_note"),
     proofImageUrl: text("proof_image_url"),
@@ -167,8 +241,8 @@ export const platformsRelations = relations(platforms, ({ many }) => ({
   transactions: many(transactions),
 }));
 
-// Affiliate Link Relations
-export const affiliateLinksRelations = relations(affiliateLinks, ({ one }) => ({
+// Affiliate Link Relations - Thêm transactions relation
+export const affiliateLinksRelations = relations(affiliateLinks, ({ one, many }) => ({
   // Một link thuộc về một user (có thể null nếu là khách)
   user: one(users, {
     fields: [affiliateLinks.userId],
@@ -179,23 +253,52 @@ export const affiliateLinksRelations = relations(affiliateLinks, ({ one }) => ({
     fields: [affiliateLinks.platformId],
     references: [platforms.id],
   }),
+  // Một link có nhiều transactions
+  transactions: many(transactions),
 }));
 
 // Transaction Relations
 export const transactionsRelations = relations(transactions, ({ one }) => ({
-  // Một transaction thuộc về một user
   user: one(users, {
     fields: [transactions.userId],
     references: [users.id],
   }),
-  // Một transaction thuộc về một platform
   platform: one(platforms, {
     fields: [transactions.platformId],
     references: [platforms.id],
   }),
+  affiliateLink: one(affiliateLinks, {
+    fields: [transactions.affiliateLinkId],
+    references: [affiliateLinks.id],
+  }),
 }));
 
-// Withdrawal Request Relations
+export const systemSettingsRelations = relations(systemSettings, ({ many }) => ({
+  systemSettings: many(systemSettings),
+}));
+
+export const reconciliationLogsRelations = relations(reconciliationLogs, ({ one }) => ({
+  admin: one(users, {
+    fields: [reconciliationLogs.adminId],
+    references: [users.id],
+  }),
+  transaction: one(transactions, {
+    fields: [reconciliationLogs.transactionId],
+    references: [transactions.id],
+  }),
+}));
+
+export const disputesRelations = relations(disputes, ({ one }) => ({
+  transaction: one(transactions, {
+    fields: [disputes.transactionId],
+    references: [transactions.id],
+  }),
+  user: one(users, {
+    fields: [disputes.userId],
+    references: [users.id],
+  }),
+}));
+
 export const withdrawalRequestsRelations = relations(withdrawalRequests, ({ one }) => ({
   // Một withdrawal request thuộc về một user
   user: one(users, {
@@ -218,6 +321,15 @@ export type NewAffiliateLink = typeof affiliateLinks.$inferInsert;
 
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
+
+export type SystemSetting = typeof systemSettings.$inferSelect;
+export type NewSystemSetting = typeof systemSettings.$inferInsert;
+
+export type ReconciliationLog = typeof reconciliationLogs.$inferSelect;
+export type NewReconciliationLog = typeof reconciliationLogs.$inferInsert;
+
+export type Dispute = typeof disputes.$inferSelect;
+export type NewDispute = typeof disputes.$inferInsert;
 
 export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;
 export type NewWithdrawalRequest = typeof withdrawalRequests.$inferInsert;

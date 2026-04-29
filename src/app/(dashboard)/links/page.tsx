@@ -12,6 +12,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -254,6 +255,10 @@ export default function LinksPage() {
                     <span className="font-medium">{link.clicks}</span>
                     <span>clicks</span>
                   </div>
+                  <Link href={`/links/${link.id}`} className="flex items-center gap-1 text-blue-600 hover:text-blue-800">
+                    <FileText className="h-4 w-4" />
+                    <span>Chi tiết</span>
+                  </Link>
                   <div className="text-slate-500">
                     {formatDate(link.createdAt)}
                   </div>

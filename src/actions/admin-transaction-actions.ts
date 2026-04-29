@@ -13,7 +13,7 @@ import type { Result } from "@/types";
 
 export interface AdminTransactionItem {
     id: string;
-    type: "cashback" | "withdrawal";
+    type: "cashback" | "withdrawal" | "commission";
     userId: string;
     userEmail: string;
     amount: number;
@@ -28,6 +28,8 @@ export interface TransactionStats {
     totalWithdrawn: number;
     pendingWithdrawals: number;
     todayTransactions: number;
+    pendingCount: number;
+    orphanedCount: number;
 }
 
 // ============================================
@@ -53,7 +55,7 @@ async function checkAdminPermission(): Promise<Result<string>> {
 // ============================================
 
 export async function getAdminTransactionsAction(
-    filter?: "all" | "cashback" | "withdrawal"
+    filter?: "all" | "cashback" | "withdrawal" | "commission" | "orphaned"
 ): Promise<Result<AdminTransactionItem[]>> {
     try {
         const permCheck = await checkAdminPermission();
@@ -63,8 +65,9 @@ export async function getAdminTransactionsAction(
 
         const result: AdminTransactionItem[] = [];
 
-        // Lấy transactions (cashback)
-        if (!filter || filter === "all" || filter === "cashback") {
+        // Lấy transactions (cashback/commission)
+        if (!filter || filter === "all" || filter === "cashback" || filter === "commission" || filter === "orphaned") {
+            const isOrphaned = filter === "orphaned";
             const cashbacks = await db
                 .select({
                     id: transactions.id,
@@ -73,21 +76,27 @@ export async function getAdminTransactionsAction(
                     status: transactions.status,
                     orderIdExternal: transactions.orderIdExternal,
                     platformId: transactions.platformId,
+                    type: transactions.type,
                     createdAt: transactions.createdAt,
                 })
                 .from(transactions)
+                .where(isOrphaned ? eq(transactions.status, "orphaned") : undefined)
                 .orderBy(desc(transactions.createdAt))
                 .limit(100);
 
             // Lấy user email và platform name
             for (const tx of cashbacks) {
-                if (!tx.userId) continue;
+                if (!tx.userId && !isOrphaned) continue;
 
-                const user = await db
-                    .select({ email: users.email })
-                    .from(users)
-                    .where(eq(users.id, tx.userId))
-                    .limit(1);
+                let userEmail = "N/A";
+                if (tx.userId) {
+                    const user = await db
+                        .select({ email: users.email })
+                        .from(users)
+                        .where(eq(users.id, tx.userId))
+                        .limit(1);
+                    userEmail = user[0]?.email || "N/A";
+                }
 
                 let platformName = "Unknown";
                 if (tx.platformId) {
@@ -101,9 +110,9 @@ export async function getAdminTransactionsAction(
 
                 result.push({
                     id: tx.id,
-                    type: "cashback",
-                    userId: tx.userId,
-                    userEmail: user[0]?.email || "N/A",
+                    type: tx.type === "withdrawal" ? "withdrawal" : "commission",
+                    userId: tx.userId || "",
+                    userEmail: userEmail,
                     amount: Number(tx.amount) || 0,
                     status: tx.status,
                     platformName,
@@ -169,11 +178,11 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             return { success: false, error: permCheck.error };
         }
 
-        // Tổng cashback (approved)
+        // Tổng cashback (confirmed)
         const cashbackSum = await db
             .select({ total: sql<number>`COALESCE(sum(${transactions.cashbackAmount}), 0)` })
             .from(transactions)
-            .where(eq(transactions.status, "approved"));
+            .where(eq(transactions.status, "confirmed"));
 
         // Tổng đã rút (approved)
         const withdrawnSum = await db
@@ -182,10 +191,22 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             .where(eq(withdrawalRequests.status, "approved"));
 
         // Pending withdrawals count
-        const pendingCount = await db
+        const pendingWdCount = await db
             .select({ count: sql<number>`count(*)` })
             .from(withdrawalRequests)
             .where(eq(withdrawalRequests.status, "pending"));
+
+        // Pending transactions count
+        const pendingTxCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(transactions)
+            .where(eq(transactions.status, "pending"));
+
+        // Orphaned transactions count
+        const orphanedCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(transactions)
+            .where(eq(transactions.status, "orphaned"));
 
         // Today transactions
         const today = new Date();
@@ -201,12 +222,170 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             data: {
                 totalCashback: Number(cashbackSum[0]?.total) || 0,
                 totalWithdrawn: Number(withdrawnSum[0]?.total) || 0,
-                pendingWithdrawals: Number(pendingCount[0]?.count) || 0,
+                pendingWithdrawals: Number(pendingWdCount[0]?.count) || 0,
                 todayTransactions: Number(todayTxCount[0]?.count) || 0,
+                pendingCount: Number(pendingTxCount[0]?.count) || 0,
+                orphanedCount: Number(orphanedCount[0]?.count) || 0,
             },
         };
     } catch (error) {
         console.error("Get admin transaction stats error:", error);
         return { success: false, error: "Lỗi tải thống kê" };
+    }
+}
+
+// ============================================
+// GET USERS LIST (ADMIN)
+// ============================================
+
+export async function getUsersListAction(): Promise<Result<{ id: string; email: string }[]>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        const usersList = await db
+            .select({ id: users.id, email: users.email })
+            .from(users)
+            .where(sql`${users.email} IS NOT NULL`)
+            .orderBy(desc(users.createdAt))
+            .limit(500);
+
+        return { success: true, data: usersList.map(u => ({ id: u.id, email: u.email || "" })) };
+    } catch (error) {
+        console.error("Get users list error:", error);
+        return { success: false, error: "Lỗi tải danh sách user" };
+    }
+}
+
+// ============================================
+// CLAIM ORPHANED TRANSACTION (ADMIN)
+// ============================================
+
+export async function claimOrphanedTransactionAction(
+    transactionId: string,
+    userId: string
+): Promise<Result<null>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        // Verify transaction is orphaned
+        const tx = await db
+            .select({ status: transactions.status })
+            .from(transactions)
+            .where(eq(transactions.id, transactionId))
+            .limit(1);
+
+        if (tx.length === 0) {
+            return { success: false, error: "Không tìm thấy giao dịch" };
+        }
+
+        if (tx[0].status !== "orphaned") {
+            return { success: false, error: "Giao dịch không ở trạng thái orphaned" };
+        }
+
+        // Update transaction with userId
+        await db
+            .update(transactions)
+            .set({
+                userId,
+                status: "pending",
+                updatedAt: new Date(),
+            })
+            .where(eq(transactions.id, transactionId));
+
+        return { success: true, data: null };
+    } catch (error) {
+        console.error("Claim orphaned transaction error:", error);
+        return { success: false, error: "Lỗi gán giao dịch" };
+    }
+}
+
+// ============================================
+// REJECT ORPHANED TRANSACTION (ADMIN)
+// ============================================
+
+export async function rejectOrphanedTransactionAction(
+    transactionId: string,
+    reason: string
+): Promise<Result<null>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        await db
+            .update(transactions)
+            .set({
+                status: "rejected",
+                rejectionReason: reason,
+                updatedAt: new Date(),
+            })
+            .where(eq(transactions.id, transactionId));
+
+        return { success: true, data: null };
+    } catch (error) {
+        console.error("Reject orphaned transaction error:", error);
+        return { success: false, error: "Lỗi từ chối giao dịch" };
+    }
+}
+
+// ============================================
+// DELETE ORPHANED TRANSACTION (ADMIN)
+// ============================================
+
+export async function deleteOrphanedTransactionAction(transactionId: string): Promise<Result<null>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        await db
+            .delete(transactions)
+            .where(eq(transactions.id, transactionId));
+
+        return { success: true, data: null };
+    } catch (error) {
+        console.error("Delete orphaned transaction error:", error);
+        return { success: false, error: "Lỗi xóa giao dịch" };
+    }
+}
+
+// ============================================
+// UPDATE TRANSACTION STATUS (BATCH - ADMIN)
+// ============================================
+
+export async function updateTransactionStatusAction(
+    ids: string[],
+    status: string,
+    reason?: string
+): Promise<Result<null>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        for (const id of ids) {
+            await db
+                .update(transactions)
+                .set({
+                    status,
+                    rejectionReason: reason || null,
+                    updatedAt: new Date(),
+                })
+                .where(eq(transactions.id, id));
+        }
+
+        return { success: true, data: null };
+    } catch (error) {
+        console.error("Update transaction status error:", error);
+        return { success: false, error: "Lỗi cập nhật trạng thái" };
     }
 }

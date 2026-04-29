@@ -3,7 +3,7 @@
 import { eq, desc, count } from "drizzle-orm";
 
 import { db } from "@/db";
-import { affiliateLinks, platforms } from "@/db/schema";
+import { affiliateLinks, platforms, transactions } from "@/db/schema";
 import { auth } from "@/auth";
 import { createLinkSchema } from "@/lib/z-schema";
 import { generateShortLink, detectPlatform, AffiliateAdapterFactory, type GeneratedLinkResult } from "@/services/affiliate.service";
@@ -157,8 +157,8 @@ export async function createLinkAction(
 // ============================================
 
 /**
- * Lấy danh sách link của user đã đăng nhập
- */
+* Lấy danh sách link của user đã đăng nhập
+*/
 export async function getUserLinksAction(
   page: number = 1,
   pageSize: number = 20
@@ -170,7 +170,7 @@ export async function getUserLinksAction(
       return { success: false, error: "Vui lòng đăng nhập" };
     }
 
-    // Count total
+    // Count total - only status = 'open'
     const countResult = await db
       .select({ count: count() })
       .from(affiliateLinks)
@@ -189,6 +189,7 @@ export async function getUserLinksAction(
         createdAt: affiliateLinks.createdAt,
         platformId: affiliateLinks.platformId,
         metaData: affiliateLinks.metaData,
+        status: affiliateLinks.status,
       })
       .from(affiliateLinks)
       .where(eq(affiliateLinks.userId, session.user.id))
@@ -205,9 +206,56 @@ export async function getUserLinksAction(
         currentPage: page,
       }
     };
-  } catch (error) {
+} catch (error) {
     console.error("Get user links error:", error);
-    return { success: false, error: "Không thể tải danh sách link" };
+    return { success: false, error: "Lỗi khi lấy danh sách link" };
+  }
+}
+
+// ============================================
+// GET LINK TRANSACTIONS ACTION
+// ============================================
+
+export async function getLinkTransactionsAction(linkId: string) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return { success: false, error: "Vui lòng đăng nhập" };
+    }
+
+    // Get transactions for this link
+    const linkTransactions = await db
+      .select({
+        id: transactions.id,
+        orderIdExternal: transactions.orderIdExternal,
+        orderAmount: transactions.orderAmount,
+        commissionAmount: transactions.commissionAmount,
+        cashbackAmount: transactions.cashbackAmount,
+        commissionPercent: transactions.commissionPercent,
+        points: transactions.points,
+        type: transactions.type,
+        status: transactions.status,
+        createdAt: transactions.createdAt,
+      })
+      .from(transactions)
+      .where(eq(transactions.affiliateLinkId, linkId))
+      .orderBy(desc(transactions.createdAt));
+
+    // Calculate total points
+    const totalPoints = linkTransactions
+      .filter((tx) => tx.status === "confirmed")
+      .reduce((sum, tx) => sum + (tx.points || 0), 0);
+
+    return {
+      success: true,
+      data: {
+        transactions: linkTransactions,
+        totalPoints,
+      },
+    };
+} catch (error) {
+    console.error("Get link transactions error:", error);
+    return { success: false, error: "Lỗi khi lấy giao dịch" };
   }
 }
 

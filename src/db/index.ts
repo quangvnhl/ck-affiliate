@@ -18,5 +18,8 @@ const client = postgres(connectionString, {
 // Export drizzle instance với schema
 export const db = drizzle(client, { schema });
 
+// Export postgres client for connection management
+export { client as postgresClient };
+
 // Export type cho db instance
 export type Database = typeof db;
