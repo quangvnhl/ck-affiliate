@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
-import { withdrawalRequests, users } from "@/db/schema";
+import { withdrawalRequests, users, transactions } from "@/db/schema";
 import { auth } from "@/auth";
 import type { Result } from "@/types";
 
@@ -83,6 +83,16 @@ export async function approveWithdrawalAction(
       })
       .where(eq(withdrawalRequests.id, withdrawalId));
 
+    if (withdrawal[0].transactionId) {
+      await db
+        .update(transactions)
+        .set({
+          status: "approved",
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, withdrawal[0].transactionId));
+    }
+
     // Log action
     console.log(
       `[Admin Action] Withdrawal ${withdrawalId} APPROVED by ${admin.email}`
@@ -152,15 +162,27 @@ export async function rejectWithdrawalAction(
       return { success: false, error: "Không tìm thấy thông tin người dùng" };
     }
 
-    // Transaction: Hoàn tiền + Update status
-    // 1. Hoàn tiền vào ví user
-    await db
-      .update(users)
-      .set({
-        walletBalance: sql`${users.walletBalance} + ${amount}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
+    // 1. Hoàn tiền vào ví user nếu dùng walletBalance (cho legacy) - hiện tại ta hoàn qua transactions
+    // Nếu có transactionId thì ta đổi status transaction thành rejected để hoàn lại điểm
+    if (withdrawal[0].transactionId) {
+      await db
+        .update(transactions)
+        .set({
+          status: "rejected",
+          rejectionReason: reason,
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, withdrawal[0].transactionId));
+    } else {
+      // Legacy support (rút bằng walletBalance)
+      await db
+        .update(users)
+        .set({
+          walletBalance: sql`${users.walletBalance} + ${amount}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId));
+    }
 
     // 2. Update withdrawal status
     await db
@@ -190,6 +212,81 @@ export async function rejectWithdrawalAction(
     }
     
     return { success: false, error: "Đã xảy ra lỗi khi từ chối yêu cầu" };
+  }
+}
+
+/**
+ * Đánh dấu yêu cầu rút tiền đã được thanh toán
+ * Flow:
+ * 1. Admin cập nhật trạng thái đã thanh toán (có thể đính kèm proof)
+ * 2. System update status -> 'paid'
+ */
+export async function markWithdrawalPaidAction(
+  withdrawalId: string,
+  proofImageUrl?: string,
+  note?: string
+): Promise<Result<{ id: string }>> {
+  try {
+    const admin = await requireAdmin();
+
+    if (!withdrawalId) {
+      return { success: false, error: "ID yêu cầu rút tiền không hợp lệ" };
+    }
+
+    const withdrawal = await db
+      .select()
+      .from(withdrawalRequests)
+      .where(eq(withdrawalRequests.id, withdrawalId))
+      .limit(1);
+
+    if (withdrawal.length === 0) {
+      return { success: false, error: "Không tìm thấy yêu cầu rút tiền" };
+    }
+
+    if (withdrawal[0].status !== "approved" && withdrawal[0].status !== "processing") {
+      return { 
+        success: false, 
+        error: `Yêu cầu phải ở trạng thái đã duyệt hoặc đang xử lý (hiện tại: ${withdrawal[0].status})` 
+      };
+    }
+
+    const adminNote = note ? `Paid by ${admin.email}: ${note}` : `Paid by ${admin.email}`;
+
+    // Update withdrawal status -> paid
+    await db
+      .update(withdrawalRequests)
+      .set({
+        status: "paid",
+        proofImageUrl: proofImageUrl || withdrawal[0].proofImageUrl || null,
+        processedAt: new Date(),
+        adminNote: adminNote,
+      })
+      .where(eq(withdrawalRequests.id, withdrawalId));
+
+    // Update transaction status -> paid if exists
+    if (withdrawal[0].transactionId) {
+      await db
+        .update(transactions)
+        .set({
+          status: "paid",
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, withdrawal[0].transactionId));
+    }
+
+    console.log(`[Admin Action] Withdrawal ${withdrawalId} PAID by ${admin.email}`);
+
+    revalidatePath("/admin/withdrawals");
+
+    return { success: true, data: { id: withdrawalId } };
+  } catch (error) {
+    console.error("Mark withdrawal paid error:", error);
+    
+    if (error instanceof Error && error.message.includes("Unauthorized")) {
+      return { success: false, error: error.message };
+    }
+    
+    return { success: false, error: "Đã xảy ra lỗi khi cập nhật trạng thái thanh toán" };
   }
 }
 
@@ -254,7 +351,7 @@ export async function toggleUserStatusAction(
  * Lấy danh sách yêu cầu rút tiền (cho Admin)
  */
 export async function getWithdrawalRequestsAction(
-  status?: "pending" | "approved" | "rejected"
+  status?: "pending" | "approved" | "rejected" | "processing" | "paid"
 ) {
   try {
     await requireAdmin();

@@ -203,6 +203,7 @@ export const withdrawalRequests = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => users.id),
+    transactionId: uuid("transaction_id").references(() => transactions.id),
 
     amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
 
@@ -309,6 +310,11 @@ export const withdrawalRequestsRelations = relations(withdrawalRequests, ({ one 
   user: one(users, {
     fields: [withdrawalRequests.userId],
     references: [users.id],
+  }),
+  // Liên kết với transaction
+  transaction: one(transactions, {
+    fields: [withdrawalRequests.transactionId],
+    references: [transactions.id],
   }),
 }));
 

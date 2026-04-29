@@ -1,91 +1,26 @@
-import { Wallet } from "lucide-react";
+import { Wallet, Clock, CheckCircle, XCircle, BanknoteIcon } from "lucide-react";
 import { WithdrawalsTable } from "./withdrawals-table";
+import { getWithdrawalRequestsAction } from "@/actions/admin-actions";
 
-// Mock data cho withdrawal requests
-const mockWithdrawals = [
-  {
-    id: "wd-001",
-    userEmail: "user1@example.com",
-    userId: "u-001",
-    amount: "500000",
-    bankSnapshot: {
-      bankName: "Vietcombank",
-      accountNumber: "1234567890",
-      accountHolder: "NGUYEN VAN A",
-    },
-    status: "pending" as const,
-    createdAt: new Date("2025-01-14T10:30:00"),
-    processedAt: null,
-    adminNote: null,
-  },
-  {
-    id: "wd-002",
-    userEmail: "user2@example.com",
-    userId: "u-002",
-    amount: "1250000",
-    bankSnapshot: {
-      bankName: "TPBank",
-      accountNumber: "0987654321",
-      accountHolder: "TRAN THI B",
-    },
-    status: "pending" as const,
-    createdAt: new Date("2025-01-14T09:15:00"),
-    processedAt: null,
-    adminNote: null,
-  },
-  {
-    id: "wd-003",
-    userEmail: "user3@example.com",
-    userId: "u-003",
-    amount: "750000",
-    bankSnapshot: {
-      bankName: "Techcombank",
-      accountNumber: "1122334455",
-      accountHolder: "LE VAN C",
-    },
-    status: "approved" as const,
-    createdAt: new Date("2025-01-13T14:20:00"),
-    processedAt: new Date("2025-01-13T16:45:00"),
-    adminNote: "Approved by admin@ck-affiliate.com",
-  },
-  {
-    id: "wd-004",
-    userEmail: "user4@example.com",
-    userId: "u-004",
-    amount: "200000",
-    bankSnapshot: {
-      bankName: "MB Bank",
-      accountNumber: "5566778899",
-      accountHolder: "PHAM THI D",
-    },
-    status: "rejected" as const,
-    createdAt: new Date("2025-01-12T11:00:00"),
-    processedAt: new Date("2025-01-12T15:30:00"),
-    adminNote: "Rejected: Sai tên chủ tài khoản",
-  },
-  {
-    id: "wd-005",
-    userEmail: "user5@example.com",
-    userId: "u-005",
-    amount: "3000000",
-    bankSnapshot: {
-      bankName: "ACB",
-      accountNumber: "9988776655",
-      accountHolder: "HOANG VAN E",
-    },
-    status: "pending" as const,
-    createdAt: new Date("2025-01-15T08:00:00"),
-    processedAt: null,
-    adminNote: null,
-  },
-];
+export const dynamic = "force-dynamic";
 
-export default function AdminWithdrawalsPage() {
+export default async function AdminWithdrawalsPage() {
+  // Fetch data
+  const [pendingRes, approvedRes, paidRes, rejectedRes] = await Promise.all([
+    getWithdrawalRequestsAction("pending"),
+    getWithdrawalRequestsAction("approved"), // Also handles processing if needed, but we'll fetch approved
+    getWithdrawalRequestsAction("paid"),
+    getWithdrawalRequestsAction("rejected"),
+  ]);
+
+  const pendingWithdrawals = pendingRes.success ? pendingRes.data || [] : [];
+  const approvedWithdrawals = approvedRes.success ? approvedRes.data || [] : [];
+  const paidWithdrawals = paidRes.success ? paidRes.data || [] : [];
+  const rejectedWithdrawals = rejectedRes.success ? rejectedRes.data || [] : [];
+
   // Thống kê nhanh
-  const pendingCount = mockWithdrawals.filter(w => w.status === "pending").length;
-  const totalPendingAmount = mockWithdrawals
-    .filter(w => w.status === "pending")
-    .reduce((sum, w) => sum + parseInt(w.amount), 0);
+  const pendingCount = pendingWithdrawals.length;
+  const totalPendingAmount = pendingWithdrawals.reduce((sum, w) => sum + parseInt(String(w.amount)), 0);
 
   return (
     <div className="space-y-6">
@@ -106,27 +41,96 @@ export default function AdminWithdrawalsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           label="Đang chờ duyệt"
           value={pendingCount}
           color="yellow"
+          icon={<Clock className="h-4 w-4" />}
         />
         <StatCard
-          label="Đã duyệt hôm nay"
-          value={1}
+          label="Đã duyệt (Chờ CK)"
+          value={approvedWithdrawals.length}
+          color="blue"
+          icon={<CheckCircle className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Đã thanh toán"
+          value={paidWithdrawals.length}
           color="green"
+          icon={<BanknoteIcon className="h-4 w-4" />}
         />
         <StatCard
           label="Đã từ chối"
-          value={1}
+          value={rejectedWithdrawals.length}
           color="red"
+          icon={<XCircle className="h-4 w-4" />}
         />
       </div>
 
-      {/* Data Table */}
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
-        <WithdrawalsTable data={mockWithdrawals} />
+      {/* Tables Section */}
+      <div className="space-y-8">
+        
+        {/* Table 1: Pending */}
+        <section>
+          <h2 className="text-lg font-semibold text-yellow-400 mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5" /> 
+            1. Đang chờ duyệt ({pendingWithdrawals.length})
+          </h2>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+            {pendingWithdrawals.length > 0 ? (
+              <WithdrawalsTable data={pendingWithdrawals} tableType="pending" />
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-4">Không có yêu cầu chờ duyệt</p>
+            )}
+          </div>
+        </section>
+
+        {/* Table 2: Approved / Processing */}
+        <section>
+          <h2 className="text-lg font-semibold text-blue-400 mb-3 flex items-center gap-2">
+            <CheckCircle className="h-5 w-5" /> 
+            2. Đã duyệt - Chờ thanh toán ({approvedWithdrawals.length})
+          </h2>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+            {approvedWithdrawals.length > 0 ? (
+              <WithdrawalsTable data={approvedWithdrawals} tableType="approved" />
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-4">Không có yêu cầu chờ thanh toán</p>
+            )}
+          </div>
+        </section>
+
+        {/* Table 3: Paid */}
+        <section>
+          <h2 className="text-lg font-semibold text-green-400 mb-3 flex items-center gap-2">
+            <BanknoteIcon className="h-5 w-5" /> 
+            3. Đã thanh toán ({paidWithdrawals.length})
+          </h2>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+            {paidWithdrawals.length > 0 ? (
+              <WithdrawalsTable data={paidWithdrawals} tableType="paid" />
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-4">Chưa có giao dịch đã thanh toán</p>
+            )}
+          </div>
+        </section>
+
+        {/* Table 4: Rejected */}
+        <section>
+          <h2 className="text-lg font-semibold text-red-400 mb-3 flex items-center gap-2">
+            <XCircle className="h-5 w-5" /> 
+            4. Đã từ chối ({rejectedWithdrawals.length})
+          </h2>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+            {rejectedWithdrawals.length > 0 ? (
+              <WithdrawalsTable data={rejectedWithdrawals} tableType="rejected" />
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-4">Không có giao dịch bị từ chối</p>
+            )}
+          </div>
+        </section>
+
       </div>
     </div>
   );
@@ -137,20 +141,26 @@ function StatCard({
   label,
   value,
   color,
+  icon,
 }: {
   label: string;
   value: number;
-  color: "yellow" | "green" | "red";
+  color: "yellow" | "green" | "red" | "blue";
+  icon: React.ReactNode;
 }) {
   const colorClasses = {
     yellow: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
     green: "bg-green-500/20 text-green-400 border-green-500/30",
     red: "bg-red-500/20 text-red-400 border-red-500/30",
+    blue: "bg-blue-500/20 text-blue-400 border-blue-500/30",
   };
 
   return (
     <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
-      <p className="text-sm opacity-80">{label}</p>
+      <div className="flex items-center gap-2 text-sm opacity-80">
+        {icon}
+        <p>{label}</p>
+      </div>
       <p className="mt-1 text-2xl font-bold">{value}</p>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { transactions, systemSettings, affiliateLinks } from "@/db/schema";
+import { transactions, systemSettings, affiliateLinks, users, withdrawalRequests } from "@/db/schema";
 import { auth } from "@/auth";
 
 export async function getUserPointsAction() {
@@ -144,15 +144,47 @@ export async function createWithdrawalByPointsAction(points: number) {
     return { success: false, error: `Không đủ điểm. Bạn có ${totalPoints} điểm` };
   }
 
+  const userInfos = await db
+    .select({
+      bankName: users.bankName,
+      bankAccountNumber: users.bankAccountNumber,
+      bankAccountHolder: users.bankAccountHolder,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (userInfos.length === 0) {
+    return { success: false, error: "Người dùng không tồn tại" };
+  }
+
+  const userInfo = userInfos[0];
+  if (!userInfo.bankName || !userInfo.bankAccountNumber || !userInfo.bankAccountHolder) {
+    return { success: false, error: "Vui lòng cập nhật thông tin ngân hàng trước khi rút điểm" };
+  }
+
   // Convert points to VND
   const amountVND = points * exchangeRate;
 
   // Create withdrawal transaction (negative points)
-  await db.insert(transactions).values({
+  const result = await db.insert(transactions).values({
     userId,
     type: "withdrawal",
     points: -points,
     cashbackAmount: amountVND.toString(),
+    status: "confirmed", // Confirmed immediately to deduct points from available balance
+  }).returning();
+
+  // Create withdrawal request
+  await db.insert(withdrawalRequests).values({
+    userId,
+    transactionId: result[0].id,
+    amount: amountVND.toString(),
+    bankSnapshot: {
+      bankName: userInfo.bankName,
+      accountNumber: userInfo.bankAccountNumber,
+      accountHolder: userInfo.bankAccountHolder,
+    },
     status: "pending",
   });
 
