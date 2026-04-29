@@ -59,12 +59,6 @@ export async function createReconciliationAction(input: ReconciliationInput): Pr
 
   const adminId = session.user.id;
 
-  // Parse subId to code
-  const code = parseSubIdToCode(input.subId);
-  if (!code) {
-    return { success: false, error: "SubId không hợp lệ. Chỉ cho phép a-z, A-Z, 0-9" };
-  }
-
   // Get commission percent - từ input hoặc settings
   const commissionPercent = input.commissionPercent || 70;
 
@@ -73,6 +67,58 @@ export async function createReconciliationAction(input: ReconciliationInput): Pr
 
   // Calculate points (1000đ = 1 điểm)
   const points = Math.floor(cashbackAmount / 1000);
+
+  // If subId is empty, create orphaned transaction immediately
+  if (!input.subId || input.subId.trim() === "") {
+    const result = await db.insert(transactions).values({
+      userId: null,
+      affiliateLinkId: null,
+      platformId: input.platformId,
+      type: "commission",
+      orderIdExternal: input.orderId,
+      orderAmount: input.orderAmount.toString(),
+      checkoutId: input.checkoutId,
+      commissionAmount: input.commissionAmount.toString(),
+      cashbackAmount: cashbackAmount.toString(),
+      commissionPercent,
+      points,
+      status: "orphaned",
+      rawData: {
+        subId: input.subId,
+        checkoutId: input.checkoutId,
+        commissionAmount: input.commissionAmount,
+      },
+    }).returning();
+
+    // Create reconciliation log
+    await db.insert(reconciliationLogs).values({
+      adminId,
+      transactionId: result[0].id,
+      action: "created",
+      note: `Orphaned - SubId bị trống`,
+    });
+
+    return {
+      success: true,
+      data: {
+        transaction: result[0],
+        link: null,
+        user: null,
+        orderAmount: input.orderAmount,
+        commissionAmount: input.commissionAmount,
+        commissionPercent,
+        cashbackAmount,
+        points,
+      },
+      error: "SubId trống. Giao dịch được lưu dưới dạng orphaned.",
+    };
+  }
+
+  // Parse subId to code
+  const code = parseSubIdToCode(input.subId);
+  if (!code) {
+    return { success: false, error: "SubId không hợp lệ. Chỉ cho phép a-z, A-Z, 0-9" };
+  }
 
   // Find affiliate link by code
   const links = await db
@@ -91,6 +137,7 @@ export async function createReconciliationAction(input: ReconciliationInput): Pr
     const result = await db.insert(transactions).values({
       userId: null,
       affiliateLinkId: null,
+      platformId: input.platformId,
       type: "commission",
       orderIdExternal: input.orderId,
       orderAmount: input.orderAmount.toString(),
@@ -315,5 +362,171 @@ export async function getPlatformsAction() {
   return {
     success: true,
     data: allPlatforms,
+  };
+}
+
+// ============================================
+// BATCH IMPORT RECONCILIATION
+// ============================================
+
+export interface BatchReconciliationRow {
+  subId: string;
+  orderId: string;
+  orderAmount: number;
+  checkoutId: string;
+  commissionAmount: number;
+  commissionPercent?: number;
+  rawData: any;
+}
+
+export interface BatchReconciliationInput {
+  rows: BatchReconciliationRow[];
+  commissionPercent?: number;
+  platformId?: number;
+}
+
+export interface BatchReconciliationResult {
+  success: boolean;
+  data?: {
+    total: number;
+    successCount: number;
+    orphanedCount: number;
+    failedCount: number;
+    errors: { row: number; error: string }[];
+  };
+  error?: string;
+}
+
+export async function batchImportReconciliationAction(input: BatchReconciliationInput): Promise<BatchReconciliationResult> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "admin") {
+    return { success: false, error: "Không có quyền admin" };
+  }
+
+  const adminId = session.user.id;
+  const commissionPercent = input.commissionPercent || 70;
+  
+  let successCount = 0;
+  let orphanedCount = 0;
+  let failedCount = 0;
+  const errors: { row: number; error: string }[] = [];
+
+  for (let i = 0; i < input.rows.length; i++) {
+    const row = input.rows[i];
+    try {
+      const rowCommissionPercent = row.commissionPercent !== undefined ? row.commissionPercent : commissionPercent;
+      const cashbackAmount = Math.floor(row.commissionAmount * rowCommissionPercent / 100);
+      const points = Math.floor(cashbackAmount / 1000);
+
+      const code = row.subId ? parseSubIdToCode(row.subId) : null;
+      if (!code) {
+        // If no valid code or empty subId, create orphaned transaction
+        const result = await db.insert(transactions).values({
+          userId: null,
+          affiliateLinkId: null,
+          platformId: input.platformId,
+          type: "commission",
+          orderIdExternal: row.orderId,
+          orderAmount: row.orderAmount.toString(),
+          checkoutId: row.checkoutId,
+          commissionAmount: row.commissionAmount.toString(),
+          cashbackAmount: cashbackAmount.toString(),
+          commissionPercent: rowCommissionPercent,
+          points,
+          status: "orphaned",
+          rawData: row.rawData,
+        }).returning();
+
+        await db.insert(reconciliationLogs).values({
+          adminId,
+          transactionId: result[0].id,
+          action: "created",
+          note: `Batch orphaned - ${row.subId ? 'không tìm thấy link với code' : 'SubId bị trống'}`,
+        });
+        orphanedCount++;
+        continue;
+      }
+
+      const links = await db
+        .select()
+        .from(affiliateLinks)
+        .where(and(
+          eq(affiliateLinks.code, code),
+          eq(affiliateLinks.status, "open")
+        ));
+
+      if (links.length === 0) {
+        const result = await db.insert(transactions).values({
+          userId: null,
+          affiliateLinkId: null,
+          platformId: input.platformId,
+          type: "commission",
+          orderIdExternal: row.orderId,
+          orderAmount: row.orderAmount.toString(),
+          checkoutId: row.checkoutId,
+          commissionAmount: row.commissionAmount.toString(),
+          cashbackAmount: cashbackAmount.toString(),
+          commissionPercent: rowCommissionPercent,
+          points,
+          status: "orphaned",
+          rawData: row.rawData,
+        }).returning();
+
+        await db.insert(reconciliationLogs).values({
+          adminId,
+          transactionId: result[0].id,
+          action: "created",
+          note: `Batch orphaned - không tìm thấy link với code: ${code}`,
+        });
+        orphanedCount++;
+        continue;
+      }
+
+      if (links.length > 1) {
+        failedCount++;
+        errors.push({ row: i + 1, error: `Tìm thấy nhiều link khớp cho code: ${code}` });
+        continue;
+      }
+
+      const link = links[0];
+      const result = await db.insert(transactions).values({
+        userId: link.userId,
+        affiliateLinkId: link.id,
+        platformId: input.platformId,
+        type: "commission",
+        orderIdExternal: row.orderId,
+        orderAmount: row.orderAmount.toString(),
+        checkoutId: row.checkoutId,
+        commissionAmount: row.commissionAmount.toString(),
+        cashbackAmount: cashbackAmount.toString(),
+        commissionPercent: rowCommissionPercent,
+        points,
+        status: "confirmed", // Batch import defaults to confirmed
+        rawData: row.rawData,
+      }).returning();
+
+      await db.insert(reconciliationLogs).values({
+        adminId,
+        transactionId: result[0].id,
+        action: "created",
+        note: `Batch đối soát thành công (Auto-confirmed)`,
+      });
+      successCount++;
+
+    } catch (err: any) {
+      failedCount++;
+      errors.push({ row: i + 1, error: err.message || "Lỗi không xác định" });
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      total: input.rows.length,
+      successCount,
+      orphanedCount,
+      failedCount,
+      errors
+    }
   };
 }
