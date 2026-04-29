@@ -27,9 +27,23 @@ import {
   getPlatformsAction,
   batchImportReconciliationAction,
   type CodeMatch,
-  type BatchReconciliationRow
+  type BatchReconciliationRow,
+  type TransactionStatus
 } from "@/actions/admin-reconciliation-actions";
 import { formatCurrency } from "@/lib/utils";
+
+const mapOrderStatusToTransaction = (orderStatus: string): TransactionStatus => {
+  switch (orderStatus) {
+    case "Hoàn thành":
+      return "confirmed";
+    case "Đã hủy":
+      return "rejected";
+    case "Đang chờ xử lý":
+      return "pending";
+    default:
+      return "orphaned";
+  }
+};
 
 interface ReconciliationData {
   codeMatches?: CodeMatch[];
@@ -177,13 +191,17 @@ export default function AdminReconciliationPage() {
         const data = results.data as Record<string, string>[];
         
         data.forEach((row) => {
-          const subId = row["Sub Id 1"] || row["SubID"] || row["sub_id_1"] || "";
+          // SubID: Sub_id1, Sub Id 1, SubID, sub_id_1, subid, Sub Id
+          const subId = row["Sub_id1"] || row["Sub Id 1"] || row["Sub Id"] || row["SubID"] || row["sub_id_1"] || row["subid"] || row["subId"] || "";
           const orderId = row["ID đơn hàng"] || row["Order ID"] || row["order_id"] || "";
           const orderAmountStr = row["Giá trị đơn hàng (₫)"] || row["Order Amount"] || row["order_amount"] || "0";
           const checkoutId = row["Checkout id"] || row["Checkout ID"] || row["checkout_id"] || "";
           const commissionAmountStr = row["Hoa hồng ròng tiếp thị liên kết(₫)"] || row["Commission Amount"] || row["commission"] || "0";
+          const orderStatus = row["Trạng thái đặt hàng"] || row["Order Status"] || row["Trạng thái"] || "";
           
           if (!subId && !orderId) return;
+
+          const defaultStatus = mapOrderStatusToTransaction(orderStatus);
 
           parsedRows.push({
             subId: subId ? String(subId) : "",
@@ -191,6 +209,8 @@ export default function AdminReconciliationPage() {
             orderAmount: parseInt(String(orderAmountStr).replace(/[^0-9-]/g, "")) || 0,
             checkoutId: String(checkoutId),
             commissionAmount: parseInt(String(commissionAmountStr).replace(/[^0-9-]/g, "")) || 0,
+            orderStatus: String(orderStatus),
+            status: defaultStatus,
             rawData: row
           });
         });
@@ -215,6 +235,10 @@ export default function AdminReconciliationPage() {
 
   const updateRowSubId = (index: number, value: string) => {
     setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, subId: value } : row));
+  };
+
+  const updateRowStatus = (index: number, value: TransactionStatus) => {
+    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, status: value } : row));
   };
 
   const handleBatchSubmit = async () => {
@@ -386,7 +410,6 @@ export default function AdminReconciliationPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center text-sm text-slate-400">
                 <span>Đã tải {csvData.length} dòng. Vui lòng kiểm tra và ấn Xác nhận bên dưới.</span>
-                <span className="text-green-400">Status mặc định: Đã xác nhận</span>
               </div>
               
               <div className="border border-slate-700 rounded-lg overflow-x-auto">
@@ -400,6 +423,7 @@ export default function AdminReconciliationPage() {
                       <th className="px-4 py-3 text-right">Hoa hồng</th>
                       <th className="px-4 py-3 text-right">Commission %</th>
                       <th className="px-4 py-3 text-right">Cashback</th>
+                      <th className="px-4 py-3">Trạng thái</th>
                       <th className="px-4 py-3 text-center">Hành động</th>
                     </tr>
                   </thead>
@@ -431,6 +455,23 @@ export default function AdminReconciliationPage() {
                             />
                           </td>
                           <td className="px-4 py-3 text-right text-green-400 font-medium">{formatCurrency(cashback)}</td>
+                          <td className="px-4 py-3">
+                            <select
+                              value={row.status}
+                              onChange={(e) => updateRowStatus(index, e.target.value as TransactionStatus)}
+                              className={`h-8 px-2 rounded text-xs font-medium border ${
+                                row.status === "confirmed" ? "bg-green-500/20 border-green-500/30 text-green-400" :
+                                row.status === "pending" ? "bg-yellow-500/20 border-yellow-500/30 text-yellow-400" :
+                                row.status === "rejected" ? "bg-red-500/20 border-red-500/30 text-red-400" :
+                                "bg-slate-700/50 border-slate-600 text-slate-400"
+                              }`}
+                            >
+                              <option value="pending">Chờ xử lý</option>
+                              <option value="confirmed">Đã xác nhận</option>
+                              <option value="rejected">Đã hủy</option>
+                              <option value="orphaned">Orphaned</option>
+                            </select>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             <button 
                               onClick={() => removeRow(index)}
