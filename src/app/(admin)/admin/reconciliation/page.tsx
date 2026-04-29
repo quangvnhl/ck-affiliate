@@ -14,7 +14,8 @@ import {
   FileSpreadsheet,
   FilePlus,
   FilePenLine,
-  X
+  X,
+  ChevronDown
 } from "lucide-react";
 import Link from "next/link";
 import Papa from "papaparse";
@@ -37,7 +38,13 @@ import {
   type RowActionType,
   type BatchReconciliationResult
 } from "@/actions/admin-reconciliation-actions";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, parseMoney } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 // Debounce helper
 function debounce<T extends (...args: Parameters<T>) => void>(
@@ -245,12 +252,18 @@ export default function AdminReconciliationPage() {
 
           const defaultStatus = mapOrderStatusToTransaction(orderStatus);
 
+          const orderAmountRaw = String(orderAmountStr);
+          const commissionAmountRaw = String(commissionAmountStr);
+          
+          const orderAmount = parseMoney(orderAmountRaw);
+          const commissionAmount = parseMoney(commissionAmountRaw);
+
           parsedRows.push({
             subId: subId ? String(subId) : "",
             orderId: String(orderId),
-            orderAmount: parseInt(String(orderAmountStr).replace(/[^0-9-]/g, "")) || 0,
+            orderAmount,
             checkoutId: String(checkoutId),
-            commissionAmount: parseInt(String(commissionAmountStr).replace(/[^0-9-]/g, "")) || 0,
+            commissionAmount,
             orderStatus: String(orderStatus),
             status: defaultStatus,
             rawData: row
@@ -326,49 +339,49 @@ export default function AdminReconciliationPage() {
   };
 
   const updateRowSubId = (index: number, value: string) => {
-    setCsvData((prev) => {
-      const updatedRow = { ...prev[index], subId: value };
-      
-      // Preview only this row
-      if (selectedPlatform) {
-        const platformId = parseInt(selectedPlatform);
-        if (!isNaN(platformId)) {
-          setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
-          
-          previewSingleRowAction(updatedRow, platformId).then(res => {
-            if (res.success && res.data) {
-              setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
-            }
-            setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
-          });
-        }
+    // Update csvData first
+    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, subId: value } : row));
+    
+    // Preview only this row - outside of setCsvData callback
+    if (selectedPlatform) {
+      const platformId = parseInt(selectedPlatform);
+      if (!isNaN(platformId)) {
+        // Get the updated row for preview
+        const updatedRow = { ...csvData[index], subId: value };
+        
+        setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
+        
+        previewSingleRowAction(updatedRow, platformId).then(res => {
+          if (res.success && res.data) {
+            setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
+          }
+          setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
+        });
       }
-      
-      return prev.map((row, i) => i === index ? { ...row, subId: value } : row);
-    });
+    }
   };
 
   const updateRowStatus = (index: number, value: TransactionStatus) => {
-    setCsvData((prev) => {
-      const updatedRow = { ...prev[index], status: value };
-      
-      // Preview only this row
-      if (selectedPlatform) {
-        const platformId = parseInt(selectedPlatform);
-        if (!isNaN(platformId)) {
-          setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
-          
-          previewSingleRowAction(updatedRow, platformId).then(res => {
-            if (res.success && res.data) {
-              setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
-            }
-            setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
-          });
-        }
+    // Update csvData first
+    setCsvData((prev) => prev.map((row, i) => i === index ? { ...row, status: value } : row));
+    
+    // Preview only this row - outside of setCsvData callback
+    if (selectedPlatform) {
+      const platformId = parseInt(selectedPlatform);
+      if (!isNaN(platformId)) {
+        // Get the updated row for preview
+        const updatedRow = { ...csvData[index], status: value };
+        
+        setIsPreviewLoading(curr => ({ ...curr, [index]: true }));
+        
+        previewSingleRowAction(updatedRow, platformId).then(res => {
+          if (res.success && res.data) {
+            setRowActions(curr => ({ ...curr, [index]: res.data!.action }));
+          }
+          setIsPreviewLoading(curr => ({ ...curr, [index]: false }));
+        });
       }
-      
-      return prev.map((row, i) => i === index ? { ...row, status: value } : row);
-    });
+    }
   };
 
   const handleBatchSubmit = async () => {
@@ -503,9 +516,9 @@ export default function AdminReconciliationPage() {
                       className={!selectedPlatform ? "cursor-not-allowed" : "cursor-pointer"}
                     >
                       {!selectedPlatform ? (
-                        <div className="flex h-9 items-center justify-center rounded-md bg-slate-600 px-4 text-sm font-medium text-slate-400">
+                        <div className="flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white-400">
                           <Upload className="h-4 w-4 mr-2" />
-                          Chọn platform trước
+                          Chọn nền tảng trước
                         </div>
                       ) : (
                         <div className="flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer transition-colors">

@@ -567,7 +567,9 @@ export async function batchImportReconciliationAction(input: BatchReconciliation
     const row = input.rows[i];
     try {
       const rowCommissionPercent = row.commissionPercent !== undefined ? row.commissionPercent : commissionPercent;
-      const cashbackAmount = Math.floor(row.commissionAmount * rowCommissionPercent / 100);
+      const normalizedCommission = Math.floor(row.commissionAmount);
+      const normalizedOrder = Math.floor(row.orderAmount);
+      const cashbackAmount = Math.floor(normalizedCommission * rowCommissionPercent / 100);
       const points = Math.floor(cashbackAmount / 1000);
 
       // ============================================

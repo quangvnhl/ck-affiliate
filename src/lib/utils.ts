@@ -25,3 +25,36 @@ export function formatDate(date: Date | string): string {
     minute: "2-digit",
   }).format(d);
 }
+
+// Parse tiền từ CSV - loại bỏ phần thập phân (floor)
+// Input: "1597.765", "1,597.765", 4053.5, ...
+// Output: 1597, 1597, 4053, ...
+export function parseMoney(value: string | number): number {
+  if (typeof value === "number") {
+    return Math.floor(value);
+  }
+
+  const cleaned = value.toString().trim().replace(/\s/g, "").replace(/,/g, ".");
+  const parsed = parseFloat(cleaned);
+
+  if (isNaN(parsed) || parsed < 0) return 0;
+
+  return Math.floor(parsed);
+}
+
+// Validate số tiền - không quá 10 ký tự
+export function validateMoneyInput(value: string): { valid: boolean; value: number } {
+  const cleaned = value.toString().trim().replace(/\s/g, "").replace(/,/g, ".");
+  
+  if (cleaned.length > 10) {
+    return { valid: false, value: 0 };
+  }
+
+  const parsed = parseFloat(cleaned);
+
+  if (isNaN(parsed) || parsed < 0) {
+    return { valid: false, value: 0 };
+  }
+
+  return { valid: true, value: Math.floor(parsed) };
+}
