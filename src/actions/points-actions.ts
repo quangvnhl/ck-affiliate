@@ -183,7 +183,7 @@ export async function createWithdrawalByPointsAction(points: number) {
     type: "withdrawal",
     points: -points,
     cashbackAmount: amountVND.toString(),
-    status: "confirmed", // Confirmed immediately to deduct points from available balance
+    status: "pending", // Confirmed immediately to deduct points from available balance
   }).returning();
 
   // Create withdrawal request
