@@ -340,7 +340,7 @@ export function WalletDashboard() {
                                     </div>
                                     <div>
                                         <p className="text-sm font-medium text-slate-900">
-                                            {tx.type === "commission" ? "Cashback" : "Rút điểm"} ({Math.abs(tx.points)} điểm)
+                                            {tx.type === "commission" ? "Cộng điểm" : "Rút điểm"} ({Math.abs(tx.points)} điểm)
                                         </p>
                                         <p className="text-xs text-slate-500">{formatDateTime(tx.createdAt)}</p>
                                     </div>

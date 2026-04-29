@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ClipboardCheck,
   Loader2,
@@ -56,6 +56,70 @@ function debounce<T extends (...args: Parameters<T>) => void>(
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };
+}
+
+// SubIdInput: Input với Dropdown để chọn SubID từ rawData
+function SubIdInput({
+  value,
+  onChange,
+  rawData
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  rawData: Record<string, unknown>;
+}) {
+  const subIdsFromRaw = React.useMemo(() => {
+    const keys = ["Sub_id1", "Sub_id2", "Sub_id3", "Sub_id4", "Sub_id5"];
+    return keys
+      .map((k) => rawData[k])
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+  }, [rawData]);
+
+  const hasSubIds = subIdsFromRaw.length > 0;
+
+  return (
+    <div className="relative flex items-center h-8 w-full pr-8 bg-slate-800 border-slate-700 rounded">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="SubID"
+        className="h-8 w-full pr-8 bg-slate-800 border-slate-700/0 text-slate-50 font-mono text-xs shadow-none"
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={!hasSubIds}
+            className={`absolute right-1 h-6 w-6 flex items-center justify-center rounded hover:bg-slate-700 ${
+              hasSubIds ? "text-slate-400" : "text-slate-600 cursor-not-allowed"
+            }`}
+            title={hasSubIds ? "Chọn SubID từ dữ liệu gốc" : "Không có SubID trong dữ liệu"}
+          >
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        </DropdownMenuTrigger>
+        {hasSubIds && (
+          <DropdownMenuContent align="start" className="max-h-48 overflow-y-auto">
+            <DropdownMenuItem
+              onClick={() => onChange("")}
+              className="text-slate-400"
+            >
+              Xóa / Để trống
+            </DropdownMenuItem>
+            {subIdsFromRaw.map((subId, idx) => (
+              <DropdownMenuItem
+                key={idx}
+                onClick={() => onChange(subId)}
+                className={value === subId ? "bg-slate-700 text-blue-400" : ""}
+              >
+                {subId}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
+    </div>
+  );
 }
 
 const mapOrderStatusToTransaction = (orderStatus: string): TransactionStatus => {
@@ -608,11 +672,10 @@ export default function AdminReconciliationPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <Input 
+                            <SubIdInput
                               value={row.subId}
-                              onChange={(e) => updateRowSubId(index, e.target.value)}
-                              placeholder="SubID"
-                              className="h-8 w-32 bg-slate-800 border-slate-700 text-slate-50 font-mono text-xs"
+                              onChange={(val) => updateRowSubId(index, val)}
+                              rawData={row.rawData}
                             />
                           </td>
                           <td className="px-4 py-3 font-mono text-xs">{row.orderId}</td>
