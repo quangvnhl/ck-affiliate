@@ -14,6 +14,8 @@ import {
     Filter,
     AlertCircle,
     Trash2,
+    RotateCcw,
+    Eye,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,13 +27,12 @@ import {
     claimOrphanedTransactionAction,
     rejectOrphanedTransactionAction,
     deleteOrphanedTransactionAction,
+    restoreTransactionAction,
     updateTransactionStatusAction,
     type AdminTransactionItem,
     type TransactionStats,
 } from "@/actions/admin-transaction-actions";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { or } from "drizzle-orm";
-import { type } from '../../../../../.next/dev/types/routes';
 
 export default function AdminTransactionsPage() {
     const router = useRouter();
@@ -42,6 +43,7 @@ export default function AdminTransactionsPage() {
 
     const statusParam = searchParams.get("status");
     const typeParam = searchParams.get("type");
+    const showDeletedParam = searchParams.get("show");
 
     const initialStatus = statusParam && ["all", "pending", "confirmed", "rejected", "paid", "orphaned"].includes(statusParam) 
         ? statusParam as "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned"
@@ -49,9 +51,11 @@ export default function AdminTransactionsPage() {
     const initialType = typeParam && ["all", "commission", "withdrawal"].includes(typeParam) 
         ? typeParam as "all" | "commission" | "withdrawal"
         : "all";
+    const initialShowDeleted = showDeletedParam === "deleted";
 
     const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned">(initialStatus);
     const [typeFilter, setTypeFilter] = useState<"all" | "commission" | "withdrawal">(initialType);
+    const [showDeleted, setShowDeleted] = useState(initialShowDeleted);
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [claimEmail, setClaimEmail] = useState("");
@@ -62,7 +66,7 @@ export default function AdminTransactionsPage() {
     const loadData = useCallback(async () => {
         setIsLoading(true);
         const [txResult, statsResult] = await Promise.all([
-            getAdminTransactionsAction(statusFilter, typeFilter),
+            getAdminTransactionsAction(statusFilter, typeFilter, showDeleted),
             getAdminTransactionStatsAction(),
         ]);
 
@@ -73,7 +77,7 @@ export default function AdminTransactionsPage() {
             setStats(statsResult.data);
         }
         setIsLoading(false);
-    }, [statusFilter, typeFilter]);
+    }, [statusFilter, typeFilter, showDeleted]);
 
     useEffect(() => {
         loadData();
@@ -97,6 +101,18 @@ export default function AdminTransactionsPage() {
             params.delete("type");
         } else {
             params.set("type", newType);
+        }
+        router.push(`/admin/transactions?${params.toString()}`, { scroll: false });
+    };
+
+    const handleToggleShowDeleted = () => {
+        const newShowDeleted = !showDeleted;
+        setShowDeleted(newShowDeleted);
+        const params = new URLSearchParams(searchParams.toString());
+        if (newShowDeleted) {
+            params.set("show", "deleted");
+        } else {
+            params.delete("show");
         }
         router.push(`/admin/transactions?${params.toString()}`, { scroll: false });
     };
@@ -188,6 +204,19 @@ export default function AdminTransactionsPage() {
 
         for (const txId of selectedIds) {
             await deleteOrphanedTransactionAction(txId);
+        }
+
+        setProcessing(false);
+        setSelectedIds(new Set());
+        loadData();
+    };
+
+    const handleRestore = async () => {
+        if (selectedIds.size === 0) return;
+        setProcessing(true);
+
+        for (const txId of selectedIds) {
+            await restoreTransactionAction(txId);
         }
 
         setProcessing(false);
@@ -292,13 +321,14 @@ export default function AdminTransactionsPage() {
                 {/* Type Filter */}
                 <select
                     value={typeFilter}
+                    disabled={showDeleted}
                     onChange={(e) => {
                         handleTypeChange(e.target.value as "all" | "commission" | "withdrawal");
                         setSelectedIds(new Set());
                         setClaimEmail("");
                         setRejectReason("");
                     }}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <option value="all">Tất cả loại</option>
                     <option value="commission">Hoa hồng</option>
@@ -308,13 +338,14 @@ export default function AdminTransactionsPage() {
                 {/* Status Filter */}
                 <select
                     value={statusFilter}
+                    disabled={showDeleted}
                     onChange={(e) => {
                         handleStatusChange(e.target.value as "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned");
                         setSelectedIds(new Set());
                         setClaimEmail("");
                         setRejectReason("");
                     }}
-                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <option value="all">Tất cả trạng thái</option>
                     <option value="pending">Chờ xử lý</option>
@@ -327,11 +358,31 @@ export default function AdminTransactionsPage() {
                 <span className="text-sm text-slate-400">
                     {filteredTransactions.length} giao dịch
                 </span>
+
+                {/* Show Deleted Toggle */}
+                <Button
+                    variant={showDeleted ? "default" : "outline"}
+                    size="sm"
+                    onClick={handleToggleShowDeleted}
+                    className={showDeleted ? "border-slate-500 bg-slate-600 hover:bg-slate-700" : "border-red-700/20 bg-red-600/20 text-red-400 hover:bg-red-700/40 hover:text-red-500"}
+                >
+                    {showDeleted ? (
+                        <>
+                            <Eye className="mr-2 h-4 w-4" />
+                            Xem tất cả
+                        </>
+                    ) : (
+                        <>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Đã xóa
+                        </>
+                    )}
+                </Button>
             </div>
 
             {/* Batch Actions */}
             {selectedIds.size > 0 && (
-                <div className="space-y-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                <div className="space-y-2 rounded-lg border border-slate-500/30 bg-slate-500/10 p-3">
                     <span className="text-yellow-400 text-sm ml-2">
                         {selectedIds.size} chọn
                     </span>
@@ -388,6 +439,23 @@ export default function AdminTransactionsPage() {
                                     </Button>
                                 </div>
                             </div>
+
+                            {/* Restore */}
+                            {showDeleted && (
+                                <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3">
+                                    <p className="text-xs text-green-400 font-medium mb-2">Khôi phục:</p>
+                                    <div className=" flex flex-wrap gap-2 items-center">
+                                        <Button
+                                            onClick={handleRestore}
+                                            disabled={processing}
+                                            className="bg-green-600 hover:bg-green-700 text-sm py-1"
+                                        >
+                                            <RotateCcw className="h-4 w-4 mr-1" />
+                                            Khôi phục
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Change Status Group */}
                             <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3">

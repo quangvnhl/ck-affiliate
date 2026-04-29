@@ -121,6 +121,9 @@ export const transactions = pgTable(
     status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending', 'confirmed', 'rejected', 'paid'
     rejectionReason: text("rejection_reason"),
 
+    // Soft delete - false = chưa xóa, true = đã xóa
+    trash: boolean("trash").default(false).notNull(),
+
     rawData: jsonb("raw_data"), // Lưu thông tin đầy đủ từ Shopee
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -131,6 +134,8 @@ export const transactions = pgTable(
     index("idx_trans_order").on(table.orderIdExternal),
     // Index để query points theo user + status
     index("idx_trans_user_status").on(table.userId, table.status),
+    // Index cho soft delete
+    index("idx_trans_deleted").on(table.trash),
   ]
 );
 

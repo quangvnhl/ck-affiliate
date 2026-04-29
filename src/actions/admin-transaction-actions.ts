@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, sql, desc, and, gte, isNull, ne } from "drizzle-orm";
+import { eq, sql, desc, and, gte, isNull, ne, not } from "drizzle-orm";
 
 import { db } from "@/db";
 import { users, transactions, platforms } from "@/db/schema";
@@ -18,6 +18,7 @@ export interface AdminTransactionItem {
     userEmail: string;
     amount: number;
     status: string;
+    trash?: boolean;
     platformName?: string;
     orderIdExternal?: string;
     createdAt: Date;
@@ -56,7 +57,8 @@ async function checkAdminPermission(): Promise<Result<string>> {
 
 export async function getAdminTransactionsAction(
     status?: "all" | "pending" | "confirmed" | "rejected" | "paid" | "orphaned",
-    type?: "all" | "commission" | "withdrawal"
+    type?: "all" | "commission" | "withdrawal",
+    showDeleted?: boolean
 ): Promise<Result<AdminTransactionItem[]>> {
     try {
         const permCheck = await checkAdminPermission();
@@ -67,22 +69,41 @@ export async function getAdminTransactionsAction(
         const result: AdminTransactionItem[] = [];
         const conditions = [];
 
-        // Type filter
+        // LUÔN LỌC soft-deleted records (trừ khi showDeleted = true)
+        if (!showDeleted) {
+            conditions.push(eq(transactions.trash, false));
+        }
+
+// Type filter
         if (type && type !== "all") {
             conditions.push(eq(transactions.type, type));
+        }
+
+        // Deleted filter
+        if (showDeleted) {
+            // show deleted records only (trash = true)
+            conditions.push(eq(transactions.trash, true));
+        } else {
+            // show non-deleted records only (trash = false)
+            conditions.push(eq(transactions.trash, false));
+        }
+
+        // Deleted filter - when showDeleted=true, show ALL (deleted + non-deleted)
+        // when showDeleted=false (default), show only non-deleted
+        if (!showDeleted) {
+            conditions.push(eq(transactions.trash, false));
         }
 
         // Status filter
         if (status && status !== "all") {
             if (status === "orphaned") {
-                // Orphaned = userId is null
                 conditions.push(isNull(transactions.userId));
             } else {
                 conditions.push(eq(transactions.status, status));
             }
         }
 
-        const txRecords = await db
+const txRecords = await db
             .select({
                 id: transactions.id,
                 userId: transactions.userId,
@@ -90,6 +111,7 @@ export async function getAdminTransactionsAction(
                 userEmail: users.email,
                 amount: transactions.cashbackAmount,
                 status: transactions.status,
+                trash: transactions.trash,
                 orderIdExternal: transactions.orderIdExternal,
                 platformId: transactions.platformId,
                 platformName: platforms.name,
@@ -110,6 +132,7 @@ export async function getAdminTransactionsAction(
                 userEmail: tx.userEmail || (tx.userId ? "N/A" : "Khách"),
                 amount: Number(tx.amount) || 0,
                 status: tx.status,
+                trash: tx.trash || false,
                 platformName: tx.platformName || undefined,
                 orderIdExternal: tx.orderIdExternal || undefined,
                 createdAt: tx.createdAt,
@@ -134,13 +157,14 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             return { success: false, error: permCheck.error };
         }
 
-        // Tổng cashback (confirmed)
+// Tổng cashback (confirmed)
         const cashbackSum = await db
             .select({ total: sql<number>`COALESCE(sum(${transactions.cashbackAmount}), 0)` })
             .from(transactions)
             .where(and(
                 eq(transactions.status, "confirmed"),
-                eq(transactions.type, "commission")
+                eq(transactions.type, "commission"),
+                eq(transactions.trash, false)
             ));
 
         // Tổng đã rút (type=withdrawal, status=paid)
@@ -149,7 +173,8 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             .from(transactions)
             .where(and(
                 eq(transactions.status, "paid"),
-                eq(transactions.type, "withdrawal")
+                eq(transactions.type, "withdrawal"),
+                eq(transactions.trash, false)
             ));
 
         // Pending withdrawals (type=withdrawal, status=pending)
@@ -158,7 +183,8 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             .from(transactions)
             .where(and(
                 eq(transactions.status, "pending"),
-                eq(transactions.type, "withdrawal")
+                eq(transactions.type, "withdrawal"),
+                eq(transactions.trash, false)
             ));
 
         // Pending transactions count
@@ -167,16 +193,18 @@ export async function getAdminTransactionStatsAction(): Promise<Result<Transacti
             .from(transactions)
             .where(and(
                 eq(transactions.status, "pending"),
-                eq(transactions.type, "commission")
+                eq(transactions.type, "commission"),
+                eq(transactions.trash, false)
             ));
 
-        // Orphaned transactions count
+// Orphaned transactions count
         const orphanedCount = await db
             .select({ count: sql<number>`count(*)` })
             .from(transactions)
             .where(and(
                 eq(transactions.status, "orphaned"),
-                eq(transactions.type, "commission")
+                eq(transactions.type, "commission"),
+                eq(transactions.trash, false)
             ));
 
         // Today transactions
@@ -307,7 +335,7 @@ export async function rejectOrphanedTransactionAction(
 }
 
 // ============================================
-// DELETE ORPHANED TRANSACTION (ADMIN)
+// SOFT DELETE ORPHANED TRANSACTION (ADMIN)
 // ============================================
 
 export async function deleteOrphanedTransactionAction(transactionId: string): Promise<Result<null>> {
@@ -318,13 +346,43 @@ export async function deleteOrphanedTransactionAction(transactionId: string): Pr
         }
 
         await db
-            .delete(transactions)
+            .update(transactions)
+            .set({
+                trash: true,
+                updatedAt: new Date(),
+            })
             .where(eq(transactions.id, transactionId));
 
         return { success: true, data: null };
     } catch (error) {
         console.error("Delete orphaned transaction error:", error);
         return { success: false, error: "Lỗi xóa giao dịch" };
+    }
+}
+
+// ============================================
+// RESTORE TRANSACTION (ADMIN)
+// ============================================
+
+export async function restoreTransactionAction(transactionId: string): Promise<Result<null>> {
+    try {
+        const permCheck = await checkAdminPermission();
+        if (!permCheck.success) {
+            return { success: false, error: permCheck.error };
+        }
+
+        await db
+            .update(transactions)
+            .set({
+                trash: false,
+                updatedAt: new Date(),
+            })
+            .where(eq(transactions.id, transactionId));
+
+        return { success: true, data: null };
+    } catch (error) {
+        console.error("Restore transaction error:", error);
+        return { success: false, error: "Lỗi khôi phục giao dịch" };
     }
 }
 
